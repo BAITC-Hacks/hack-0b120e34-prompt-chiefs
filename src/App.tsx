@@ -94,7 +94,7 @@ export default function App() {
     setDoctorState('loading');
     setBuilderError('');
     try {
-      const nextQuestions = await taskDoctor.getClarifyingQuestions(draft);
+      const nextQuestions = await taskDoctor.getClarifyingQuestions(draft, locale);
       if (nextQuestions.length < 3) throw new Error('Missing clarification questions');
       setQuestions(nextQuestions);
       setAnswers({});
