@@ -19,6 +19,15 @@ const scoring = await import(moduleUrl('../src/lib/scoring.ts'));
 const ai = await import(moduleUrl('../src/lib/ai.ts'));
 const storage = await import(moduleUrl('../src/lib/storage.ts'));
 const proposals = await import(moduleUrl('../src/lib/proposals.ts'));
+const recommendations = await import(moduleUrl('../src/lib/recommendations.ts'));
+
+// One realistic value per scored field; each passes the length, distinct-symbol and pattern checks.
+const VALID_FIELD_VALUES = {
+  context: 'Операторы вручную разбирают обращения', need: 'Автоматически группировать обращения',
+  data: 'CSV с 500 обезличенными отзывами', expectedResult: 'Веб-прототип с фильтрами',
+  successCriteria: 'Точность не ниже 80%', constraints: 'Две недели, локально', users: 'Операторы поддержки',
+  contact: 'a@b.kz', interactionFormat: 'Созвон раз в неделю',
+};
 
 function installStorage(t) {
   const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -145,14 +154,15 @@ test('score ignores supplied scores and metadata, never mutates inputs and stays
 
 test('scoring thresholds reject malformed values and agree with offline questions', async () => {
   for (const [field, min] of Object.entries(scoring.FIELD_MIN_LENGTH)) {
-    for (const bad of [undefined, null, 123, {}, [], ' '.repeat(100), 'x'.repeat(min - 1)]) {
+    for (const bad of [undefined, null, 123, {}, [], ' '.repeat(100), 'x'.repeat(min - 1), 'а'.repeat(min + 20)]) {
       assert.equal(scoring.isFieldComplete(field, bad), false);
       const task = { ...seed.seedTasks[0], [field]: bad };
       assert.ok(scoring.scoreTask(task).total < 100);
       const questions = await ai.mockAiAdapter.getClarifyingQuestions(task);
       assert.equal(questions[0].field, field);
     }
-    assert.equal(scoring.isFieldComplete(field, `  ${'x'.repeat(min)}  `), true);
+    assert.ok(VALID_FIELD_VALUES[field].length >= min);
+    assert.equal(scoring.isFieldComplete(field, `  ${VALID_FIELD_VALUES[field]}  `), true);
   }
 });
 
@@ -415,7 +425,7 @@ test('package dependencies are pinned to the lockfile versions', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.engines.node, '>=22.16.0');
   assert.deepEqual(pkg.dependencies, {
-    '@vitejs/plugin-react': '6.1.1', vite: '8.3.0', typescript: '7.0.2', react: '19.3.0', 'react-dom': '19.3.0',
+    '@anthropic-ai/sdk': '0.128.0', '@vitejs/plugin-react': '6.1.1', vite: '8.3.0', typescript: '7.0.2', react: '19.3.0', 'react-dom': '19.3.0',
   });
   assert.deepEqual(pkg.devDependencies, { '@types/react': '19.3.0', '@types/react-dom': '19.3.0' });
 });
@@ -490,4 +500,64 @@ test('a +10 progress confirmation makes the business decision final', () => {
   const reconfirmed = storage.confirmProposalProgress(confirmed, pending.id, 'New evidence', '2026-09-24T10:00:00.000Z');
   assert.deepEqual(rejectedAfterProgress, confirmed);
   assert.deepEqual(reconfirmed, confirmed);
+});
+
+test('filler text, unmeasurable criteria and unreachable contacts earn no points', () => {
+  const complete = seed.seedTasks[0];
+  for (const [field, value] of [
+    ['constraints', 'ааааааааааааааа'], ['users', 'абабабабабабаб'], ['data', '.................'],
+    ['successCriteria', 'Заказчик будет доволен результатом'], ['contact', 'позвоните нам'],
+  ]) {
+    assert.equal(scoring.isFieldComplete(field, value), false, `${field}: ${value}`);
+    assert.ok(scoring.scoreTask({ ...complete, [field]: value }).total < 100);
+  }
+  for (const contact of ['owner@example.com', '+7 701 123 45 67', '@support_team']) {
+    assert.equal(scoring.isFieldComplete('contact', contact), true, contact);
+  }
+  for (const criteria of ['Не менее 80% верных категорий', 'Ответ быстрее 3 секунд', 'Запуск за 2 недели']) {
+    assert.equal(scoring.isFieldComplete('successCriteria', criteria), true, criteria);
+  }
+});
+
+test('local AI asks in the interface language and sends the language to a live model', async () => {
+  const task = seed.feedbackAnalysisDemo();
+  const [ru, kk, en] = await Promise.all(['ru', 'kk', 'en'].map(locale => ai.mockAiAdapter.getClarifyingQuestions(task, locale)));
+  assert.deepEqual(ru.map(q => q.field), en.map(q => q.field));
+  assert.deepEqual(kk.map(q => q.field), en.map(q => q.field));
+  assert.match(ru[0].question, /[а-яё]/i);
+  assert.match(kk[0].question, /[әғқңөұүһі]/i);
+  assert.notEqual(ru[0].question, en[0].question);
+
+  const request = ai.buildAiRequest(task, 'ru');
+  assert.equal(request.prompt, ai.AI_PROMPT);
+  assert.equal(request.language, 'ru');
+  assert.deepEqual(Object.keys(request.task).sort(), Object.keys(ai.buildAiRequest(seed.blankTask()).task).sort());
+  let sent;
+  const adapter = ai.createAiAdapter({ endpoint: '/api/doctor', fetcher: async (_url, options) => { sent = JSON.parse(options.body); return { ok: false }; } });
+  assert.deepEqual(await adapter.getClarifyingQuestions(task, 'kk'), kk);
+  assert.equal(sent.language, 'kk');
+  assert.deepEqual(ai.toAiResponse(ru), { questions: ru.map(({ field, question }) => ({ field, question })) });
+});
+
+test('recommendations follow team interests, skip tasks under 40 points and never assign teams', () => {
+  const byId = Object.fromEntries(seed.seedTeams.map(team => [team.id, team]));
+  assert.deepEqual(recommendations.recommendTasks(byId.team4, seed.seedTasks).map(task => task.id), ['t5']);
+  assert.deepEqual(recommendations.recommendTasks(byId.team2, seed.seedTasks).map(task => task.id), ['t2']);
+  // t3 (Education) is a 0-point draft: visible in the catalog, but not recommended.
+  assert.deepEqual(recommendations.recommendTasks(byId.team5, seed.seedTasks).map(task => task.id), ['t4']);
+  const hidden = { ...seed.seedTasks[4], published: false };
+  assert.deepEqual(recommendations.recommendTasks(byId.team4, [hidden]), []);
+  const before = structuredClone(seed.seedTasks);
+  recommendations.recommendTasks(byId.team1, seed.seedTasks);
+  assert.deepEqual(seed.seedTasks, before);
+});
+
+test('storage exposes translatable warning codes alongside the English text', t => {
+  const { values } = installStorage(t);
+  values.set('aisana.tasks.v1', '{broken');
+  storage.loadTasks();
+  assert.deepEqual(storage.storageWarningCodes, ['unreadable']);
+  values.set('aisana.tasks.v1', JSON.stringify(seed.seedTasks));
+  storage.loadTasks();
+  assert.deepEqual(storage.storageWarningCodes, []);
 });

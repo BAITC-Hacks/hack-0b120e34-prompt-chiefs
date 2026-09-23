@@ -6,10 +6,10 @@ export const SCORE_RULES: Readonly<Record<keyof ScoreBreakdown, ScoreRule>> = Ob
   contextAndNeed: Object.freeze({ label: 'Context & need', points: 20, tip: 'Explain the current situation and what must change.' }),
   dataAndMaterials: Object.freeze({ label: 'Data & materials', points: 20, tip: 'List available datasets, examples, documents or data sources.' }),
   expectedResult: Object.freeze({ label: 'Expected result', points: 15, tip: 'Describe the concrete deliverable the team should produce.' }),
-  successCriteria: Object.freeze({ label: 'Success criteria', points: 15, tip: 'Add measurable acceptance criteria or target metrics.' }),
+  successCriteria: Object.freeze({ label: 'Success criteria', points: 15, tip: 'Add measurable acceptance criteria: a number, percentage or deadline.' }),
   constraints: Object.freeze({ label: 'Constraints', points: 10, tip: 'Add deadlines, required technologies, access limits or other boundaries.' }),
   users: Object.freeze({ label: 'Users', points: 10, tip: 'State who will use or benefit from the solution.' }),
-  businessInteraction: Object.freeze({ label: 'Business interaction', points: 10, tip: 'Add a contact and consultation/feedback format.' }),
+  businessInteraction: Object.freeze({ label: 'Business interaction', points: 10, tip: 'Add a contact (email, phone or @handle) and consultation/feedback format.' }),
 });
 
 // A deterministic completeness heuristic, not verification of business facts.
@@ -19,8 +19,23 @@ export const FIELD_MIN_LENGTH = Object.freeze({
   constraints: 10, users: 10, contact: 5, interactionFormat: 8,
 });
 
+// Filler such as "aaaaaaaaaaaaaaa" has too few distinct letters or digits to count as a fact.
+export const MIN_DISTINCT_SYMBOLS = 4;
+
+// Field-specific signals: success criteria must be measurable, a contact must be reachable.
+export const FIELD_PATTERN: Readonly<Partial<Record<keyof typeof FIELD_MIN_LENGTH, RegExp>>> = Object.freeze({
+  successCriteria: /\d/,
+  contact: /[^\s@]+@[^\s@]+\.[^\s@]+|\+?\d[\d\s()-]{5,}\d|(?:^|\s)@[\w.]{3,}/,
+});
+
+export function hasMeaningfulText(value: string): boolean {
+  return new Set(value.toLowerCase().match(/[\p{L}\p{N}]/gu) ?? []).size >= MIN_DISTINCT_SYMBOLS;
+}
+
 export function isFieldComplete(field: keyof typeof FIELD_MIN_LENGTH, value: unknown): boolean {
-  return typeof value === 'string' && value.trim().length >= FIELD_MIN_LENGTH[field];
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  return text.length >= FIELD_MIN_LENGTH[field] && hasMeaningfulText(text) && (FIELD_PATTERN[field]?.test(text) ?? true);
 }
 
 export function readinessLevel(score: number): ReadinessLevel {

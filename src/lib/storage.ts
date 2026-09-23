@@ -9,14 +9,24 @@ const TASKS = 'aisana.tasks.v1';
 const PROPOSALS = 'aisana.proposals.v1';
 export const PROGRESS_POINTS = CONFIRMED_PROGRESS_POINTS;
 
+export type StorageWarningCode = 'unreadable' | 'invalid' | 'session-only';
+const WARNING_TEXT: Record<StorageWarningCode, string> = {
+  unreadable: 'Saved data could not be read. Demo data is shown; use Reset demo data to replace damaged storage.',
+  invalid: 'Invalid changes were not saved. Confirmed progress is final; restore the last valid state or reset demo data.',
+  'session-only': 'Browser storage is unavailable or full. Changes remain in this session only.',
+};
+
+// English text for logs and tests; the UI translates the codes.
 export let storageWarning = '';
-const warnings = new Map<string, string>();
+export let storageWarningCodes: StorageWarningCode[] = [];
+const warnings = new Map<string, StorageWarningCode>();
 // Preserve failed writes for the current page session, including a subsequent load.
 const sessionFallback = new Map<string, unknown[]>();
-function warn(key: string, message = '') {
-  if (message) warnings.set(key, message);
+function warn(key: string, code?: StorageWarningCode) {
+  if (code) warnings.set(key, code);
   else warnings.delete(key);
-  storageWarning = [...new Set(warnings.values())].join(' ');
+  storageWarningCodes = [...new Set(warnings.values())];
+  storageWarning = storageWarningCodes.map(item => WARNING_TEXT[item]).join(' ');
 }
 
 const taskFields = [
@@ -83,7 +93,7 @@ function load<T extends { id: string }>(key: string, fallback: T[], parse: (item
     warn(key);
     return items;
   } catch {
-    warn(key, 'Saved data could not be read. Demo data is shown; use Reset demo data to replace damaged storage.');
+    warn(key, 'unreadable');
     // Leave the original raw value untouched so data can still be recovered.
     return structuredClone(fallback);
   }
@@ -97,7 +107,7 @@ function save<T extends { id: string }>(
     items = parseList(value, parse);
     check?.(items);
   } catch {
-    warn(key, 'Invalid changes were not saved. Confirmed progress is final; restore the last valid state or reset demo data.');
+    warn(key, 'invalid');
     return false;
   }
   try {
@@ -107,7 +117,7 @@ function save<T extends { id: string }>(
     return true;
   } catch {
     sessionFallback.set(key, structuredClone(items));
-    warn(key, 'Browser storage is unavailable or full. Changes remain in this session only.');
+    warn(key, 'session-only');
     return false;
   }
 }

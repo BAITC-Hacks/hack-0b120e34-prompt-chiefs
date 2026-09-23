@@ -1,9 +1,12 @@
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { blankTask, feedbackAnalysisDemo, seedTeams } from './data/seed';
-import { createAiAdapter, type ClarifyingQuestion } from './lib/ai';
+import { blankTask, feedbackAnalysisDemo, seedDrafts, seedTeams } from './data/seed';
+import { createAiAdapter, toAiResponse, type AiDiagnostics, type AiResponse, type ClarifyingQuestion } from './lib/ai';
+import { canChangeProposalStatus } from './lib/proposals';
+import { recommendTasks } from './lib/recommendations';
 import { scoreTask } from './lib/scoring';
-import { loadProposals, loadTasks, resetDemoData, saveProposals, saveTasks, storageWarning } from './lib/storage';
+import { confirmProposalProgress, loadProposals, loadTasks, resetDemoData, saveProposals, saveTasks, setProposalStatus, storageWarningCodes } from './lib/storage';
 import type { Proposal, TaskCard } from './types/domain';
+import { AiContract } from './components/AiContract';
 import { ScorePanel } from './components/ScorePanel';
 import { TaskEditor, getTaskFields } from './components/TaskEditor';
 import { DemoJourney } from './components/DemoJourney';
@@ -41,6 +44,9 @@ export default function App() {
   const [industryFilter, setIndustryFilter] = useState('ALL');
   const [progressEvidence, setProgressEvidence] = useState<Record<string, string>>({});
   const [decisionTask, setDecisionTask] = useState('ALL');
+  const [aiReply, setAiReply] = useState<AiResponse | null>(null);
+  const [aiDiagnostics, setAiDiagnostics] = useState<AiDiagnostics>(() => taskDoctor.getDiagnostics());
+  const [recommendTeamId, setRecommendTeamId] = useState('');
   const t = createTranslator(locale);
 
   useEffect(() => {
@@ -57,7 +63,10 @@ export default function App() {
   const selectedTask = tasks.find((task) => task.id === selectedTaskId) ?? null;
   const allAnswersProvided = questions.length >= 3 && questions.every((question) => answers[question.id]?.trim());
   const industries = useMemo(() => [...new Set(catalog.map((task) => task.industry.trim()).filter(Boolean))].sort(), [catalog]);
-  const filteredCatalog = catalog.filter((task) => (levelFilter === 'ALL' || scoreTask(task).level === levelFilter) && (industryFilter === 'ALL' || task.industry === industryFilter));
+  const filteredCatalog = catalog.filter((task) => (levelFilter === 'ALL' || scoreTask(task).level === levelFilter) && (industryFilter === 'ALL' || task.industry.trim() === industryFilter));
+  const recommendTeam = seedTeams.find((team) => team.id === recommendTeamId);
+  const recommended = recommendTeam ? recommendTasks(recommendTeam, catalog) : [];
+  const storageMessage = storageWarningCodes.map((code) => t(code === 'unreadable' ? 'storageUnreadable' : code === 'invalid' ? 'storageInvalid' : 'storageSessionOnly')).join(' ');
 
   function openBuilder() {
     setView('builder');
@@ -72,6 +81,7 @@ export default function App() {
     setDraft({ ...blankTask(), context: brief.trim() });
     setQuestions([]);
     setAnswers({});
+    setAiReply(null);
     setBuilderError('');
   }
 
@@ -81,16 +91,30 @@ export default function App() {
     setBrief(demo.context);
     setQuestions([]);
     setAnswers({});
+    setAiReply(null);
     setBuilderError(t('demoLoaded'));
+  }
+
+  function loadDraftExample(index: number) {
+    const example = seedDrafts[index];
+    if (!example) return;
+    setBrief(example.text);
+    setDraft({ ...blankTask(), context: example.text, industry: example.industry });
+    setQuestions([]);
+    setAnswers({});
+    setAiReply(null);
+    setBuilderError('');
   }
 
   async function askAi() {
     setDoctorState('loading');
     setBuilderError('');
     try {
-      const nextQuestions = await taskDoctor.getClarifyingQuestions(draft);
+      const nextQuestions = await taskDoctor.getClarifyingQuestions(draft, locale);
+      setAiDiagnostics(taskDoctor.getDiagnostics());
       if (nextQuestions.length < 3) throw new Error('Missing clarification questions');
       setQuestions(nextQuestions);
+      setAiReply(toAiResponse(nextQuestions));
       setAnswers({});
       setDoctorState('idle');
     } catch {
@@ -131,9 +155,9 @@ export default function App() {
     setIndustryFilter('ALL');
   }
 
-  function openProposal(taskId: string) {
+  function openProposal(taskId: string, teamId = '') {
     setSelectedTaskId(taskId);
-    setProposalTeamId('');
+    setProposalTeamId(teamId);
     setProposalDraft({ solutionIdea: '', plan: '', timeline: '', prototypeUrl: '' });
     setProposalError('');
   }
@@ -163,8 +187,9 @@ export default function App() {
     setSelectedTaskId(null);
   }
 
+  // Domain helpers refuse invalid transitions, e.g. changing a decision after confirmed progress.
   function setStatus(id: string, status: Proposal['status']) {
-    const next = proposals.map((proposal) => proposal.id === id ? { ...proposal, status } : proposal);
+    const next = setProposalStatus(proposals, id, status);
     setProposals(next);
     saveProposals(next);
   }
@@ -172,10 +197,9 @@ export default function App() {
   function confirmProgress(id: string) {
     const evidence = progressEvidence[id]?.trim();
     if (!evidence) return;
-    const next = proposals.map(proposal => proposal.id === id && proposal.status === 'ACCEPTED' && !proposal.progress
-      ? { ...proposal, progress: { evidence, confirmedAt: new Date().toISOString(), points: 10 } } : proposal);
-    saveProposals(next);
+    const next = confirmProposalProgress(proposals, id, evidence);
     setProposals(next);
+    saveProposals(next);
   }
 
   function editTask(task: TaskCard) {
@@ -183,6 +207,7 @@ export default function App() {
     setBrief(task.context);
     setQuestions([]);
     setAnswers({});
+    setAiReply(null);
     openBuilder();
   }
 
@@ -199,7 +224,7 @@ export default function App() {
   }
 
   return <div className="shell">
-    {storageWarning && <p role="alert" className="inline-message">{storageWarning}</p>}
+    {storageMessage && <p role="alert" className="inline-message">{storageMessage}</p>}
     <header>
       <button className="brand-button" onClick={() => setView('catalog')}><span className="brand">TASKREADY</span><span>{t('tagline')}</span></button>
       <nav aria-label="Primary navigation">
@@ -217,6 +242,7 @@ export default function App() {
         <h1>{t('builderTitle')}</h1>
         <p className="lede">{t('builderLead')}</p>
         <section className="brief-box" aria-label={t('roughDescription')}>
+          <label><span>{t('draftExample')}</span><select value="" onChange={(event) => loadDraftExample(Number(event.target.value))}><option value="">{t('chooseDraftExample')}</option>{seedDrafts.map((example, index) => <option key={index} value={index}>{displayIndustry(example.industry, locale)} — {example.text}</option>)}</select></label>
           <label><span>{t('roughDescription')}</span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={t('roughPlaceholder')} /></label>
           <div className="brief-actions"><button className="secondary" onClick={startFromBrief}>{t('useDescription')}</button><button className="text-button" onClick={useDemoBrief}>{t('loadDemo')}</button></div>
         </section>
@@ -233,6 +259,7 @@ export default function App() {
           {questions.map((question) => <label key={question.id}><span>{question.question}</span><textarea value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>)}
           <button className="primary" onClick={applyAnswers} disabled={!allAnswersProvided}>{t('applyAnswers')}</button>
         </section>}
+        <AiContract task={draft} locale={locale} reply={aiReply} diagnostics={aiDiagnostics} t={t} />
       </section>
       <ScorePanel task={draft} locale={locale} />
     </main>}
@@ -242,7 +269,14 @@ export default function App() {
       <DemoJourney locale={locale} />
       {catalog.length === 0 ? <div className="empty-state"><h2>{t('noTasks')}</h2><p>{t('noTasksLead')}</p><button className="primary" onClick={openBuilder}>{t('createTask')}</button></div> : <>
         <section className="catalog-filters" aria-label={t('catalog')}><label><span>{t('readiness')}</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}><option value="ALL">{t('allReadiness')}</option><option value="DRAFT">{t('draft')}</option><option value="WORKING">{t('working')}</option><option value="READY">{t('ready')}</option><option value="PRIORITY">{t('priority')}</option></select></label><label><span>{t('industry')}</span><select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}><option value="ALL">{t('allIndustries')}</option>{industries.map((industry) => <option key={industry} value={industry}>{displayIndustry(industry, locale)}</option>)}</select></label><span className="filter-note">{t('showing', { shown: filteredCatalog.length, total: catalog.length })}</span></section>
-        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>{t('noMatches')}</h2><p>{t('noMatchesLead')}</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>{t('clearFilters')}</button></div> : <div className="cards">{filteredCatalog.map((task) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; const level = score.level === 'DRAFT' ? t('draft') : score.level === 'WORKING' ? t('working') : score.level === 'READY' ? t('ready') : t('priority'); return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry ? displayIndustry(task.industry, locale) : t('openTopic')}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {level}</b></div><h2>{displayTitle(task, t('notSpecified'))}</h2><p>{task.need || task.context || t('notSpecifiedClarify')}</p><div className="meta">{t('forUsers', { users: task.users || t('notSpecified') })}</div><div className="card-actions"><button className="secondary" onClick={() => openProposal(task.id)}>{t('openTask')}</button><button onClick={() => editTask(task)}>{t('editBusiness')}</button></div></article>; })}</div>}
+        <section className="panel recommendations" aria-label={t('recommendTitle')}>
+          <div><h2>{t('recommendTitle')}</h2><p>{t('recommendLead')}</p></div>
+          <label><span>{t('studentTeam')}</span><select value={recommendTeamId} onChange={(event) => setRecommendTeamId(event.target.value)}><option value="">{t('chooseTeamRecommend')}</option>{seedTeams.map((team) => <option key={team.id} value={team.id}>{team.name} — {team.interests.map((interest) => displayIndustry(interest, locale)).join(', ')}</option>)}</select></label>
+          {recommendTeam && (recommended.length > 0
+            ? <ul className="recommend-list">{recommended.map((task) => <li key={task.id}><button className="secondary" onClick={() => openProposal(task.id, recommendTeam.id)}>{displayTitle(task, t('notSpecified'))} · {scoreTask(task).total}</button></li>)}</ul>
+            : <p className="filter-note">{t('recommendNone')}</p>)}
+        </section>
+        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>{t('noMatches')}</h2><p>{t('noMatchesLead')}</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>{t('clearFilters')}</button></div> : <div className="cards">{filteredCatalog.map((task) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; const level = score.level === 'DRAFT' ? t('draft') : score.level === 'WORKING' ? t('working') : score.level === 'READY' ? t('ready') : t('priority'); const isRecommended = recommended.some((item) => item.id === task.id); return <article className={`task-card level-${score.level.toLowerCase()}${isRecommended ? ' is-recommended' : ''}`} key={task.id}><div className="card-top"><span>#{rank} · {task.industry ? displayIndustry(task.industry, locale) : t('openTopic')}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {level}</b></div><h2>{displayTitle(task, t('notSpecified'))}</h2>{score.level === 'DRAFT' && <p className="clarify-note">{t('needsClarification', { count: score.missing.length })}</p>}<p>{task.need || task.context || t('notSpecifiedClarify')}</p><div className="meta">{t('forUsers', { users: task.users || t('notSpecified') })}</div><div className="card-actions"><button className="secondary" onClick={() => openProposal(task.id)}>{t('openTask')}</button><button onClick={() => editTask(task)}>{t('editBusiness')}</button></div></article>; })}</div>}
       </>}
     </main>}
 
@@ -254,7 +288,7 @@ export default function App() {
         const task = tasks.find((item) => item.id === proposal.taskId);
         const team = seedTeams.find((item) => item.id === proposal.teamId);
         const status = proposal.status === 'PENDING' ? t('pending') : proposal.status === 'ACCEPTED' ? t('accepted') : t('rejected');
-        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{status}</b></div><h2>{task ? displayTitle(task, t('notSpecified')) : t('notSpecified')}</h2><p>{t('skills')}: {team?.skills.join(', ')} · {t('technologies')}: {team?.technologies.join(', ')} · {t('interests')}: {team?.interests.join(', ')}</p><dl><div><dt>{t('solutionIdea')}</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>{t('plan')}</dt><dd>{proposal.plan}</dd></div><div><dt>{t('timeline')}</dt><dd>{proposal.timeline}</dd></div><div><dt>{t('prototype')}</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>{t('reject')}</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>{t('accept')}</button></div>{proposal.progress ? <p>{t('confirmedStage')}: {proposal.progress.evidence} · +{proposal.progress.points} {t('points')} · {new Date(proposal.progress.confirmedAt).toLocaleString(locale)}</p> : proposal.status === 'ACCEPTED' && <section><label>{t('completedStage')}<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>{t('confirmStage')}</button></section>}</article>;
+        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{status}</b></div><h2>{task ? displayTitle(task, t('notSpecified')) : t('notSpecified')}</h2><p>{t('skills')}: {team?.skills.join(', ')} · {t('technologies')}: {team?.technologies.join(', ')} · {t('interests')}: {team?.interests.join(', ')}</p><dl><div><dt>{t('solutionIdea')}</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>{t('plan')}</dt><dd>{proposal.plan}</dd></div><div><dt>{t('timeline')}</dt><dd>{proposal.timeline}</dd></div><div><dt>{t('prototype')}</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl>{canChangeProposalStatus(proposal) ? <div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')} disabled={proposal.status === 'REJECTED'}>{t('reject')}</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')} disabled={proposal.status === 'ACCEPTED'}>{t('accept')}</button></div> : <p className="filter-note">{t('decisionFinal')}</p>}{proposal.progress ? <p>{t('confirmedStage')}: {proposal.progress.evidence} · +{proposal.progress.points} {t('points')} · {new Date(proposal.progress.confirmedAt).toLocaleString(locale)}</p> : proposal.status === 'ACCEPTED' && <section><label>{t('completedStage')}<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>{t('confirmStage')}</button></section>}</article>;
       })}</div>}
     </main>}
 
