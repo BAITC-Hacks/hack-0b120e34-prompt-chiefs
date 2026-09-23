@@ -534,8 +534,13 @@ test('local AI asks in the interface language and sends the language to a live m
   assert.deepEqual(Object.keys(request.task).sort(), Object.keys(ai.buildAiRequest(seed.blankTask()).task).sort());
   let sent;
   const adapter = ai.createAiAdapter({ endpoint: '/api/doctor', fetcher: async (_url, options) => { sent = JSON.parse(options.body); return { ok: false }; } });
+  assert.deepEqual(await adapter.getClarifyingQuestions(task, 'ru'), ru);
+  assert.equal(sent.language, 'ru');
+  // Kazakh never reaches the model: local questions only.
+  sent = undefined;
   assert.deepEqual(await adapter.getClarifyingQuestions(task, 'kk'), kk);
-  assert.equal(sent.language, 'kk');
+  assert.equal(sent, undefined);
+  assert.equal(adapter.getDiagnostics().reason, 'language');
   assert.deepEqual(ai.toAiResponse(ru), { questions: ru.map(({ field, question }) => ({ field, question })) });
 });
 

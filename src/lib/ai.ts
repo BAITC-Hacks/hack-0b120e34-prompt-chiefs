@@ -18,11 +18,13 @@ export interface AiAdapter {
 
 export type AiDiagnostics = {
   mode: 'offline' | 'live';
-  reason: 'not-configured' | 'not-called' | 'success' | 'http' | 'invalid-response' | 'timeout' | 'network';
+  reason: 'not-configured' | 'not-called' | 'success' | 'http' | 'invalid-response' | 'timeout' | 'network' | 'language';
 };
 
 // A real model call (see server/task-doctor.mjs) needs more headroom than a local stub.
 export const AI_TIMEOUT_MS = 20000;
+// The free local model writes poor Kazakh, so Kazakh always uses the local questions.
+export const LIVE_MODEL_LOCALES: readonly Locale[] = ['ru', 'en'];
 const QUESTION_COUNT = 3;
 const MAX_QUESTION_LENGTH = 500;
 const editableFields = [
@@ -234,6 +236,10 @@ export function createAiAdapter(options: AiAdapterOptions = {}): AiAdapter {
         diagnostics = { mode: 'offline', reason };
         return mockAiAdapter.getClarifyingQuestions(task, locale);
       };
+      if (!LIVE_MODEL_LOCALES.includes(locale)) {
+        clearTimeout(timer);
+        return fallback('language');
+      }
       try {
         const response = await fetcher(endpoint, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(buildAiRequest(task, locale)), signal: controller.signal,
