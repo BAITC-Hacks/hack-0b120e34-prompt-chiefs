@@ -8,7 +8,7 @@ import { ScorePanel } from './components/ScorePanel';
 import { TaskEditor, getTaskFields } from './components/TaskEditor';
 import { DemoJourney } from './components/DemoJourney';
 import { Preferences } from './components/Preferences';
-import { createTranslator, displayIndustry, loadPreference, savePreference, type FontScale, type Locale, type MotionPreference, type Theme } from './lib/i18n';
+import { createTranslator, displayIndustry, loadPreference, savePreference, type Locale, type Theme } from './lib/i18n';
 import './styles.css';
 
 type View = 'catalog' | 'builder' | 'proposals';
@@ -23,8 +23,6 @@ function displayTitle(task: TaskCard, fallback: string) {
 export default function App() {
   const [locale, setLocale] = useState<Locale>(() => loadPreference('taskready.locale', 'ru'));
   const [theme, setTheme] = useState<Theme>(() => loadPreference('taskready.theme', 'light'));
-  const [fontScale, setFontScale] = useState<FontScale>(() => loadPreference('taskready.font-scale', 'normal'));
-  const [motion, setMotion] = useState<MotionPreference>(() => loadPreference('taskready.motion', 'full'));
   const [view, setView] = useState<View>('catalog');
   const [tasks, setTasks] = useState<TaskCard[]>(loadTasks);
   const [proposals, setProposals] = useState<Proposal[]>(loadProposals);
@@ -47,14 +45,10 @@ export default function App() {
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
-    document.documentElement.dataset.fontScale = fontScale;
-    document.documentElement.dataset.motion = motion;
     document.documentElement.lang = locale;
     savePreference('taskready.locale', locale);
     savePreference('taskready.theme', theme);
-    savePreference('taskready.font-scale', fontScale);
-    savePreference('taskready.motion', motion);
-  }, [fontScale, locale, motion, theme]);
+  }, [locale, theme]);
 
   const catalog = useMemo(
     () => [...tasks].filter((task) => task.published).sort((a, b) => scoreTask(b).total - scoreTask(a).total),
@@ -214,7 +208,7 @@ export default function App() {
         <button onClick={() => setView('proposals')} className={view === 'proposals' ? 'active' : ''}>{t('proposals')}</button>
         <button className="quiet" onClick={resetDemo}>{t('reset')}</button>
       </nav>
-      <Preferences locale={locale} theme={theme} fontScale={fontScale} motion={motion} onLocaleChange={setLocale} onThemeChange={setTheme} onFontScaleChange={setFontScale} onMotionChange={setMotion} t={t} />
+      <Preferences locale={locale} theme={theme} onLocaleChange={setLocale} onThemeChange={setTheme} t={t} />
     </header>
 
     {view === 'builder' && <main className="builder-layout">
@@ -254,7 +248,7 @@ export default function App() {
 
     {view === 'proposals' && <main>
       <div className="hero"><div><div className="eyebrow">{t('businessDecision')}</div><h1>{t('proposalsTitle')}</h1><p className="lede">{t('proposalsLead')}</p></div></div>
-      <label>{t('compareTask')}<select value={decisionTask} onChange={e => setDecisionTask(e.target.value)}><option value="ALL">{t('allTasks')}</option>{catalog.map(task => <option key={task.id} value={task.id}>{displayTitle(task, t('notSpecified'))}</option>)}</select></label>
+      <label className="decision-filter">{t('compareTask')}<select value={decisionTask} onChange={e => setDecisionTask(e.target.value)}><option value="ALL">{t('allTasks')}</option>{catalog.map(task => <option key={task.id} value={task.id}>{displayTitle(task, t('notSpecified'))}</option>)}</select></label>
 <section className="panel team-points"><h2>{t('confirmedProgress')}</h2>{seedTeams.map(team => <p key={team.id}>{team.name}: {proposals.filter(p => p.teamId === team.id).reduce((sum, p) => sum + (p.progress?.points ?? 0), 0)} {t('points')}</p>)}</section>
 {proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).length === 0 ? <div className="empty-state"><h2>{t('noProposals')}</h2><p>{t('noProposalsLead')}</p></div> : <div className="proposal-list">{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).map((proposal) => {
         const task = tasks.find((item) => item.id === proposal.taskId);

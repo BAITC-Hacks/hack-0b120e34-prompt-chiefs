@@ -1,7 +1,5 @@
 export type Locale = 'en' | 'kk' | 'ru';
 export type Theme = 'light' | 'dark';
-export type FontScale = 'normal' | 'large';
-export type MotionPreference = 'full' | 'reduced';
 
 export const localeOptions: { value: Locale; label: string }[] = [
   { value: 'ru', label: 'Русский' },
@@ -12,7 +10,7 @@ export const localeOptions: { value: Locale; label: string }[] = [
 const messages = {
   en: {
     tagline: 'AI Sana business challenge marketplace', catalog: 'Catalog', createTask: 'Create task', proposals: 'Proposals', reset: 'Reset demo data',
-    settings: 'Display settings', language: 'Language', theme: 'Theme', light: 'Light', dark: 'Dark', textSize: 'Text size', normal: 'Standard', large: 'Large', motion: 'Motion', reduced: 'Reduce motion', full: 'Full motion',
+    settings: 'Display settings', language: 'Language', theme: 'Theme', light: 'Light', dark: 'Dark',
     businessWorkspace: 'Business workspace', builderTitle: 'Turn a vague need into a task teams can actually start.', builderLead: 'Start with your own words. Task Doctor asks only about missing facts; it never makes business decisions or assigns a score.', roughDescription: 'Rough business description', roughPlaceholder: 'For example: We receive customer feedback from many channels and cannot see recurring problems quickly.', useDescription: 'Use this description', loadDemo: 'Load feedback-analysis demo', readinessPreview: 'Readiness is a preview. Only a confirmed version changes the catalog ranking.', taskDoctor: 'AI Task Doctor', doctorWorking: 'Task Doctor is reviewing…', confirmPublish: 'Confirm & publish',
     doctorHeading: 'Three questions to make this brief actionable', doctorLead: 'Answers are copied into the editable card exactly as you provide them.', applyAnswers: 'Apply answers to task card',
     openCatalog: 'Open catalog', catalogTitle: 'Better briefs rise. Every team can still apply.', catalogLead: 'Readiness changes ordering only. Every business-confirmed challenge remains open to student teams.', postChallenge: 'Post a challenge',
@@ -24,7 +22,7 @@ const messages = {
   },
   ru: {
     tagline: 'AI Sana — площадка бизнес-задач', catalog: 'Каталог', createTask: 'Создать задачу', proposals: 'Отклики', reset: 'Сбросить демо-данные',
-    settings: 'Настройки отображения', language: 'Язык', theme: 'Тема', light: 'Светлая', dark: 'Тёмная', textSize: 'Размер текста', normal: 'Обычный', large: 'Крупный', motion: 'Анимация', reduced: 'Уменьшить', full: 'Полная',
+    settings: 'Настройки отображения', language: 'Язык', theme: 'Тема', light: 'Светлая', dark: 'Тёмная',
     businessWorkspace: 'РАБОЧЕЕ ПРОСТРАНСТВО БИЗНЕСА', builderTitle: 'Превратите неясную потребность в задачу, с которой команды смогут начать работу.', builderLead: 'Начните своими словами. AI-диагностика задаёт вопросы только о недостающих фактах и не принимает решений за бизнес.', roughDescription: 'Краткое описание потребности', roughPlaceholder: 'Например: отзывы клиентов приходят из разных каналов, и мы не видим повторяющиеся проблемы.', useDescription: 'Использовать описание', loadDemo: 'Загрузить демо с анализом отзывов', readinessPreview: 'Рейтинг здесь предварительный. Только подтверждённая версия меняет место в каталоге.', taskDoctor: 'AI-диагностика задач', doctorWorking: 'AI-диагностика анализирует…', confirmPublish: 'Подтвердить и опубликовать',
     doctorHeading: 'Три вопроса, чтобы сделать задачу понятной команде', doctorLead: 'Ответы копируются в редактируемую карточку ровно в том виде, в котором вы их указали.', applyAnswers: 'Применить ответы к карточке',
     openCatalog: 'ОТКРЫТЫЙ КАТАЛОГ', catalogTitle: 'Лучшие брифы поднимаются выше. Откликнуться может каждая команда.', catalogLead: 'Рейтинг влияет только на порядок. Каждая подтверждённая бизнесом задача открыта студентам.', postChallenge: 'Опубликовать задачу',
@@ -36,7 +34,7 @@ const messages = {
   },
   kk: {
     tagline: 'AI Sana — бизнес тапсырмалар алаңы', catalog: 'Каталог', createTask: 'Тапсырма құру', proposals: 'Өтінімдер', reset: 'Демо деректерін қалпына келтіру',
-    settings: 'Көрсету баптаулары', language: 'Тіл', theme: 'Тақырып', light: 'Ашық', dark: 'Қараңғы', textSize: 'Мәтін өлшемі', normal: 'Қалыпты', large: 'Үлкен', motion: 'Қозғалыс', reduced: 'Азайту', full: 'Толық',
+    settings: 'Көрсету баптаулары', language: 'Тіл', theme: 'Тақырып', light: 'Ашық', dark: 'Қараңғы',
     businessWorkspace: 'БИЗНЕС ЖҰМЫС КЕҢІСТІГІ', builderTitle: 'Жалпы қажеттілікті команда бастай алатын нақты тапсырмаға айналдырыңыз.', builderLead: 'Өз сөзіңізбен бастаңыз. AI тапсырма диагностикасы тек жетіспейтін деректерді сұрайды және бизнес үшін шешім қабылдамайды.', roughDescription: 'Қысқаша бизнес сипаттамасы', roughPlaceholder: 'Мысалы: клиент пікірлері әр арнадан келеді, ал қайталанатын мәселелерді жылдам көре алмаймыз.', useDescription: 'Осы сипаттаманы қолдану', loadDemo: 'Пікірлерді талдау демосын жүктеу', readinessPreview: 'Дайындық рейтингі алдын ала есептеледі. Тек расталған нұсқа каталогтағы орынды өзгертеді.', taskDoctor: 'AI тапсырма диагностикасы', doctorWorking: 'AI тапсырма диагностикасы талдап жатыр…', confirmPublish: 'Растау және жариялау',
     doctorHeading: 'Тапсырманы командаға түсінікті етуге арналған үш сұрақ', doctorLead: 'Жауаптар сіз берген түрде өңделетін карточкаға көшіріледі.', applyAnswers: 'Жауаптарды карточкаға қолдану',
     openCatalog: 'АШЫҚ КАТАЛОГ', catalogTitle: 'Жақсы брифтер жоғары көтеріледі. Әр команда өтінім бере алады.', catalogLead: 'Рейтинг тек реттілікке әсер етеді. Бизнес растаған әр тапсырма студенттерге ашық.', postChallenge: 'Тапсырманы жариялау',
