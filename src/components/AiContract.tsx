@@ -6,7 +6,7 @@ type Copy = (key: TranslationKey) => string;
 
 const reasonKeys: Record<AiDiagnostics['reason'], TranslationKey> = {
   'not-configured': 'aiReasonNotConfigured', 'not-called': 'aiReasonNotCalled', success: 'aiReasonSuccess',
-  http: 'aiReasonHttp', 'invalid-response': 'aiReasonInvalid', timeout: 'aiReasonTimeout', network: 'aiReasonNetwork',
+  http: 'aiReasonHttp', 'invalid-response': 'aiReasonInvalid', timeout: 'aiReasonTimeout', network: 'aiReasonNetwork', language: 'aiReasonLanguage',
 };
 
 // Shows the jury the exact prompt, request and reply contract behind AI Task Doctor.
