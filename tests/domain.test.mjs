@@ -425,7 +425,7 @@ test('package dependencies are pinned to the lockfile versions', () => {
   const pkg = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.engines.node, '>=22.16.0');
   assert.deepEqual(pkg.dependencies, {
-    '@anthropic-ai/sdk': '0.128.0', '@vitejs/plugin-react': '6.1.1', vite: '8.3.0', typescript: '7.0.2', react: '19.3.0', 'react-dom': '19.3.0',
+    '@vitejs/plugin-react': '6.1.1', vite: '8.3.0', typescript: '7.0.2', react: '19.3.0', 'react-dom': '19.3.0',
   });
   assert.deepEqual(pkg.devDependencies, { '@types/react': '19.3.0', '@types/react-dom': '19.3.0' });
 });
