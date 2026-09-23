@@ -1,24 +1,13 @@
-const steps = [
-  { number: '01', role: 'Бизнес', title: 'Описывает задачу', text: 'Короткий бриф становится черновиком карточки.' },
-  { number: '02', role: 'Task Doctor', title: 'Задаёт вопросы', text: 'Три уточнения помогают добавить только подтверждённые факты.' },
-  { number: '03', role: 'Бизнес', title: 'Подтверждает карточку', text: 'Рейтинг прозрачен: он влияет на позицию, а не на доступ.' },
-  { number: '04', role: 'Каталог', title: 'Публикует задачу', text: 'Все подтверждённые задачи видны и отсортированы по готовности.' },
-  { number: '05', role: 'Команда', title: 'Подаёт предложение', text: 'Идея, план, срок и ссылка на прототип остаются за командой.' },
-  { number: '06', role: 'Бизнес', title: 'Принимает решение', text: 'Только представитель бизнеса вручную выбирает или отклоняет отклик.' },
-];
+import type { Locale } from '../lib/i18n';
 
-export function DemoJourney() {
-  return <section className="demo-journey" aria-labelledby="demo-journey-title">
-    <div className="demo-journey__intro">
-      <div className="eyebrow">ПУТЬ ДЕМО</div>
-      <h2 id="demo-journey-title">От черновика до подтверждённого результата</h2>
-      <p>Шесть шагов за пять минут. Искусственный интеллект уточняет факты, а решения принимают люди.</p>
-    </div>
-    <ol className="demo-journey__steps">
-      {steps.map((step) => <li className="demo-journey__step" key={step.number}>
-        <span className="demo-journey__number" aria-hidden="true">{step.number}</span>
-        <div><span className="demo-journey__role">{step.role}</span><h3>{step.title}</h3><p>{step.text}</p></div>
-      </li>)}
-    </ol>
-  </section>;
+const journeys: Record<Locale, { role: string; title: string; text: string }[]> = {
+  en: [{ role: 'Business', title: 'Describe the need', text: 'Start with a rough description from the business.' }, { role: 'AI Task Doctor', title: 'Ask for missing facts', text: 'Three questions clarify the brief without inventing facts.' }, { role: 'Business', title: 'Confirm the task', text: 'The business edits and publishes the final card.' }, { role: 'Catalog', title: 'Order by readiness', text: 'Every published task stays accessible to teams.' }, { role: 'Student team', title: 'Send a proposal', text: 'Idea, plan, timeline and prototype link are required.' }, { role: 'Business', title: 'Make the decision', text: 'A person accepts or rejects proposals and confirms progress.' }],
+  ru: [{ role: 'Бизнес', title: 'Описывает потребность', text: 'Начните с чернового описания от бизнеса.' }, { role: 'AI Task Doctor', title: 'Уточняет недостающие факты', text: 'Три вопроса делают бриф яснее, не придумывая фактов.' }, { role: 'Бизнес', title: 'Подтверждает задачу', text: 'Бизнес редактирует и публикует итоговую карточку.' }, { role: 'Каталог', title: 'Сортирует по готовности', text: 'Каждая опубликованная задача остаётся доступной командам.' }, { role: 'Студенческая команда', title: 'Отправляет заявку', text: 'Нужны идея, план, сроки и ссылка на прототип.' }, { role: 'Бизнес', title: 'Принимает решение', text: 'Человек принимает или отклоняет заявку и подтверждает прогресс.' }],
+  kk: [{ role: 'Бизнес', title: 'Қажеттілікті сипаттайды', text: 'Бизнестің бастапқы сипаттамасынан бастаңыз.' }, { role: 'AI Task Doctor', title: 'Жетіспейтін фактілерді сұрайды', text: 'Үш сұрақ факт ойлап таппай, брифті нақтылайды.' }, { role: 'Бизнес', title: 'Тапсырманы растайды', text: 'Бизнес соңғы карточканы өңдеп, жариялайды.' }, { role: 'Каталог', title: 'Дайындық бойынша реттейді', text: 'Әр жарияланған тапсырма командаларға ашық қалады.' }, { role: 'Студенттік команда', title: 'Өтінім жібереді', text: 'Идея, жоспар, мерзім және прототип сілтемесі қажет.' }, { role: 'Бизнес', title: 'Шешім қабылдайды', text: 'Адам өтінімді қабылдайды не қабылдамайды және ілгерілеуді растайды.' }],
+};
+
+export function DemoJourney({ locale }: { locale: Locale }) {
+  const heading = locale === 'en' ? 'How the demo works' : locale === 'kk' ? 'Демо қалай жұмыс істейді' : 'Как работает демо';
+  const lead = locale === 'en' ? 'A visible end-to-end path for the jury.' : locale === 'kk' ? 'Қазылар алқасы үшін толық көрінетін жол.' : 'Полный видимый путь для жюри.';
+  return <section className="demo-journey"><div className="demo-journey__intro"><div className="eyebrow">DEMO FLOW</div><h2>{heading}</h2><p>{lead}</p></div><ol className="demo-journey__steps">{journeys[locale].map((step, index) => <li className="demo-journey__step" key={step.title}><span className="demo-journey__number">{index + 1}</span><div><span className="demo-journey__role">{step.role}</span><h3>{step.title}</h3><p>{step.text}</p></div></li>)}</ol></section>;
 }

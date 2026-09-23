@@ -1,11 +1,14 @@
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { blankTask, feedbackAnalysisDemo, seedTeams } from './data/seed';
 import { createAiAdapter, type ClarifyingQuestion } from './lib/ai';
 import { scoreTask } from './lib/scoring';
 import { loadProposals, loadTasks, resetDemoData, saveProposals, saveTasks, storageWarning } from './lib/storage';
 import type { Proposal, TaskCard } from './types/domain';
 import { ScorePanel } from './components/ScorePanel';
-import { TaskEditor, fields } from './components/TaskEditor';
+import { TaskEditor, getTaskFields } from './components/TaskEditor';
+import { DemoJourney } from './components/DemoJourney';
+import { Preferences } from './components/Preferences';
+import { createTranslator, loadPreference, savePreference, type FontScale, type Locale, type MotionPreference, type Theme } from './lib/i18n';
 import './styles.css';
 
 type View = 'catalog' | 'builder' | 'proposals';
@@ -13,11 +16,15 @@ type DoctorState = 'idle' | 'loading' | 'error';
 
 const taskDoctor = createAiAdapter();
 
-function displayTitle(task: TaskCard) {
-  return task.title.trim() || 'Untitled business challenge';
+function displayTitle(task: TaskCard, fallback: string) {
+  return task.title.trim() || fallback;
 }
 
 export default function App() {
+  const [locale, setLocale] = useState<Locale>(() => loadPreference('taskready.locale', 'ru'));
+  const [theme, setTheme] = useState<Theme>(() => loadPreference('taskready.theme', 'light'));
+  const [fontScale, setFontScale] = useState<FontScale>(() => loadPreference('taskready.font-scale', 'normal'));
+  const [motion, setMotion] = useState<MotionPreference>(() => loadPreference('taskready.motion', 'full'));
   const [view, setView] = useState<View>('catalog');
   const [tasks, setTasks] = useState<TaskCard[]>(loadTasks);
   const [proposals, setProposals] = useState<Proposal[]>(loadProposals);
@@ -36,6 +43,18 @@ export default function App() {
   const [industryFilter, setIndustryFilter] = useState('ALL');
   const [progressEvidence, setProgressEvidence] = useState<Record<string, string>>({});
   const [decisionTask, setDecisionTask] = useState('ALL');
+  const t = createTranslator(locale);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.fontScale = fontScale;
+    document.documentElement.dataset.motion = motion;
+    document.documentElement.lang = locale;
+    savePreference('taskready.locale', locale);
+    savePreference('taskready.theme', theme);
+    savePreference('taskready.font-scale', fontScale);
+    savePreference('taskready.motion', motion);
+  }, [fontScale, locale, motion, theme]);
 
   const catalog = useMemo(
     () => [...tasks].filter((task) => task.published).sort((a, b) => scoreTask(b).total - scoreTask(a).total),
@@ -188,62 +207,64 @@ export default function App() {
   return <div className="shell">
     {storageWarning && <p role="alert" className="inline-message">{storageWarning}</p>}
     <header>
-      <button className="brand-button" onClick={() => setView('catalog')}><span className="brand">TASKREADY</span><span>AI Sana business challenge marketplace</span></button>
+      <button className="brand-button" onClick={() => setView('catalog')}><span className="brand">TASKREADY</span><span>{t('tagline')}</span></button>
       <nav aria-label="Primary navigation">
-        <button onClick={() => setView('catalog')} className={view === 'catalog' ? 'active' : ''}>Catalog</button>
-        <button onClick={openBuilder} className={view === 'builder' ? 'active' : ''}>Create task</button>
-        <button onClick={() => setView('proposals')} className={view === 'proposals' ? 'active' : ''}>Proposals</button>
-        <button className="quiet" onClick={resetDemo}>Reset demo data</button>
+        <button onClick={() => setView('catalog')} className={view === 'catalog' ? 'active' : ''}>{t('catalog')}</button>
+        <button onClick={openBuilder} className={view === 'builder' ? 'active' : ''}>{t('createTask')}</button>
+        <button onClick={() => setView('proposals')} className={view === 'proposals' ? 'active' : ''}>{t('proposals')}</button>
+        <button className="quiet" onClick={resetDemo}>{t('reset')}</button>
       </nav>
+      <Preferences locale={locale} theme={theme} fontScale={fontScale} motion={motion} onLocaleChange={setLocale} onThemeChange={setTheme} onFontScaleChange={setFontScale} onMotionChange={setMotion} t={t} />
     </header>
 
     {view === 'builder' && <main className="builder-layout">
       <section className="panel workspace-panel">
-        <div className="eyebrow">BUSINESS WORKSPACE</div>
-        <h1>Turn a vague need into a task teams can actually start.</h1>
-        <p className="lede">Start with your own words. Task Doctor only asks about missing facts; it never makes business decisions or assigns a score.</p>
+        <div className="eyebrow">{t('businessWorkspace')}</div>
+        <h1>{t('builderTitle')}</h1>
+        <p className="lede">{t('builderLead')}</p>
         <section className="brief-box" aria-label="Start from a business description">
-          <label><span>Rough business description</span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder="For example: We receive customer feedback from many channels and cannot see recurring problems quickly." /></label>
-          <div className="brief-actions"><button className="secondary" onClick={startFromBrief}>Use this description</button><button className="text-button" onClick={useDemoBrief}>Load feedback-analysis demo</button></div>
+          <label><span>{t('roughDescription')}</span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={t('roughPlaceholder')} /></label>
+          <div className="brief-actions"><button className="secondary" onClick={startFromBrief}>{t('useDescription')}</button><button className="text-button" onClick={useDemoBrief}>{t('loadDemo')}</button></div>
         </section>
-        <TaskEditor task={draft} onChange={setDraft} />
-        <p>Readiness here is a preview. Only your confirmed version earns points and changes catalog ranking.</p>
+        <TaskEditor task={draft} onChange={setDraft} locale={locale} />
+        <p>{t('readinessPreview')}</p>
         {builderError && <div className="inline-message" role="status">{builderError}</div>}
         <div className="actions">
-          <button className="secondary" onClick={askAi} disabled={doctorState === 'loading'}>{doctorState === 'loading' ? 'Task Doctor is reviewing…' : 'AI Task Doctor'}</button>
-          <button className="primary" onClick={() => setPublicationOpen(true)}>Confirm & publish</button>
+          <button className="secondary" onClick={askAi} disabled={doctorState === 'loading'}>{doctorState === 'loading' ? t('doctorWorking') : t('taskDoctor')}</button>
+          <button className="primary" onClick={() => setPublicationOpen(true)}>{t('confirmPublish')}</button>
         </div>
-        {doctorState === 'error' && <div className="error-state">The offline fallback remains available after reloading this page.</div>}
+        {doctorState === 'error' && <div className="error-state">{t('doctorLead')}</div>}
         {questions.length > 0 && <section className="ai-box" aria-live="polite">
-          <div><div className="eyebrow">AI TASK DOCTOR</div><h3>Three questions to make this brief actionable</h3><p>Answers are copied into the editable card exactly as you provide them.</p></div>
+          <div><div className="eyebrow">AI TASK DOCTOR</div><h3>{t('doctorHeading')}</h3><p>{t('doctorLead')}</p></div>
           {questions.map((question) => <label key={question.id}><span>{question.question}</span><textarea value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>)}
-          <button className="primary" onClick={applyAnswers} disabled={!allAnswersProvided}>Apply answers to task card</button>
+          <button className="primary" onClick={applyAnswers} disabled={!allAnswersProvided}>{t('applyAnswers')}</button>
         </section>}
       </section>
-      <ScorePanel task={draft} />
+      <ScorePanel task={draft} locale={locale} />
     </main>}
 
     {view === 'catalog' && <main>
-      <div className="hero"><div><div className="eyebrow">OPEN CATALOG</div><h1>Better briefs rise. Every team can still apply.</h1><p className="lede">Readiness changes ordering only. Every business-confirmed challenge remains open to student teams.</p></div><button className="primary" onClick={openBuilder}>Post a challenge</button></div>
-      {catalog.length === 0 ? <div className="empty-state"><h2>No published tasks yet</h2><p>Create a task, review it, and use Confirm & publish to add the first challenge.</p><button className="primary" onClick={openBuilder}>Create task</button></div> : <>
-        <section className="catalog-filters" aria-label="Catalog filters"><label><span>Readiness</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}><option value="ALL">All readiness levels</option><option value="DRAFT">Draft</option><option value="WORKING">Working</option><option value="READY">Ready</option><option value="PRIORITY">Priority</option></select></label><label><span>Industry / topic</span><select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}><option value="ALL">All industries</option>{industries.map((industry) => <option key={industry} value={industry}>{industry}</option>)}</select></label><span className="filter-note">Showing {filteredCatalog.length} of {catalog.length} published tasks</span></section>
-        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>No tasks match these filters</h2><p>Every confirmed task remains in the catalog. Change a filter to view it.</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>Clear filters</button></div> : <div className="cards">{filteredCatalog.map((task, index) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry || 'Open topic'}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {score.level}</b></div><h2>{displayTitle(task)}</h2><p>{task.need || task.context || 'Business details will be shared after the team opens this challenge.'}</p><div className="meta">For: {task.users || 'Not specified yet'}</div><button className="secondary" onClick={() => openProposal(task.id)}>Open task & submit proposal</button><button onClick={() => editTask(task)}>Edit as business</button></article>; })}</div>}
+      <div className="hero"><div><div className="eyebrow">{t('openCatalog')}</div><h1>{t('catalogTitle')}</h1><p className="lede">{t('catalogLead')}</p></div><button className="primary" onClick={openBuilder}>{t('postChallenge')}</button></div>
+      <DemoJourney locale={locale} />
+      {catalog.length === 0 ? <div className="empty-state"><h2>{t('noTasks')}</h2><p>{t('noTasksLead')}</p><button className="primary" onClick={openBuilder}>{t('createTask')}</button></div> : <>
+        <section className="catalog-filters" aria-label="Catalog filters"><label><span>{t('readiness')}</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}><option value="ALL">{t('allReadiness')}</option><option value="DRAFT">{t('draft')}</option><option value="WORKING">{t('working')}</option><option value="READY">{t('ready')}</option><option value="PRIORITY">{t('priority')}</option></select></label><label><span>{t('industry')}</span><select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}><option value="ALL">{t('allIndustries')}</option>{industries.map((industry) => <option key={industry} value={industry}>{industry}</option>)}</select></label><span className="filter-note">{t('showing', { shown: filteredCatalog.length, total: catalog.length })}</span></section>
+        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>{t('noMatches')}</h2><p>{t('noMatchesLead')}</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>{t('clearFilters')}</button></div> : <div className="cards">{filteredCatalog.map((task) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; const level = score.level === 'DRAFT' ? t('draft') : score.level === 'WORKING' ? t('working') : score.level === 'READY' ? t('ready') : t('priority'); return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry || t('openTopic')}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {level}</b></div><h2>{displayTitle(task, t('notSpecified'))}</h2><p>{task.need || task.context || t('notSpecifiedClarify')}</p><div className="meta">{t('forUsers', { users: task.users || t('notSpecified') })}</div><button className="secondary" onClick={() => openProposal(task.id)}>{t('openTask')}</button><button onClick={() => editTask(task)}>{t('editBusiness')}</button></article>; })}</div>}
       </>}
     </main>}
 
     {view === 'proposals' && <main>
-      <div className="hero"><div><div className="eyebrow">BUSINESS DECISION</div><h1>Humans choose the team.</h1><p className="lede">Review each proposal in full, then manually accept or reject it.</p></div></div>
-      <label>Compare proposals for task<select value={decisionTask} onChange={e => setDecisionTask(e.target.value)}><option value="ALL">All tasks</option>{catalog.map(task => <option key={task.id} value={task.id}>{displayTitle(task)}</option>)}</select></label>
-<section className="panel team-points"><h2>Confirmed team progress</h2>{seedTeams.map(team => <p key={team.id}>{team.name}: {proposals.filter(p => p.teamId === team.id).reduce((sum, p) => sum + (p.progress?.points ?? 0), 0)} points</p>)}</section>
-{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).length === 0 ? <div className="empty-state"><h2>No proposals yet</h2><p>Published tasks are visible in the catalog for student teams to explore and propose on.</p></div> : <div className="proposal-list">{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).map((proposal) => {
+      <div className="hero"><div><div className="eyebrow">{t('businessDecision')}</div><h1>{t('proposalsTitle')}</h1><p className="lede">{t('proposalsLead')}</p></div></div>
+      <label>{t('compareTask')}<select value={decisionTask} onChange={e => setDecisionTask(e.target.value)}><option value="ALL">{t('allTasks')}</option>{catalog.map(task => <option key={task.id} value={task.id}>{displayTitle(task, t('notSpecified'))}</option>)}</select></label>
+<section className="panel team-points"><h2>{t('confirmedProgress')}</h2>{seedTeams.map(team => <p key={team.id}>{team.name}: {proposals.filter(p => p.teamId === team.id).reduce((sum, p) => sum + (p.progress?.points ?? 0), 0)} {t('points')}</p>)}</section>
+{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).length === 0 ? <div className="empty-state"><h2>{t('noProposals')}</h2><p>{t('noProposalsLead')}</p></div> : <div className="proposal-list">{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).map((proposal) => {
         const task = tasks.find((item) => item.id === proposal.taskId);
         const team = seedTeams.find((item) => item.id === proposal.teamId);
-        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{proposal.status}</b></div><h2>{task ? displayTitle(task) : 'Published task'}</h2><p>Skills: {team?.skills.join(', ')} · Technologies: {team?.technologies.join(', ')} · Interests: {team?.interests.join(', ')}</p><dl><div><dt>Solution idea</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>Plan</dt><dd>{proposal.plan}</dd></div><div><dt>Timeline</dt><dd>{proposal.timeline}</dd></div><div><dt>Prototype</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>Reject</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>Accept</button></div>{proposal.progress ? <p>Confirmed stage: {proposal.progress.evidence} · +{proposal.progress.points} points · {new Date(proposal.progress.confirmedAt).toLocaleString()}</p> : proposal.status === 'ACCEPTED' && <section><label>Completed stage and evidence<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>Business: confirm completed stage (+10 points)</button></section>}</article>;
+        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{proposal.status}</b></div><h2>{task ? displayTitle(task, t('notSpecified')) : t('notSpecified')}</h2><p>{t('skills')}: {team?.skills.join(', ')} · {t('technologies')}: {team?.technologies.join(', ')} · {t('interests')}: {team?.interests.join(', ')}</p><dl><div><dt>{t('solutionIdea')}</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>{t('plan')}</dt><dd>{proposal.plan}</dd></div><div><dt>{t('timeline')}</dt><dd>{proposal.timeline}</dd></div><div><dt>{t('prototype')}</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>{t('reject')}</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>{t('accept')}</button></div>{proposal.progress ? <p>{t('confirmedStage')}: {proposal.progress.evidence} · +{proposal.progress.points} {t('points')} · {new Date(proposal.progress.confirmedAt).toLocaleString(locale)}</p> : proposal.status === 'ACCEPTED' && <section><label>{t('completedStage')}<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>{t('confirmStage')}</button></section>}</article>;
       })}</div>}
     </main>}
 
-    {publicationOpen && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="publish-title"><div className="eyebrow">HUMAN CONFIRMATION</div><h2 id="publish-title">Publish this task to the catalog?</h2><p><b>{displayTitle(draft)}</b> will become visible to every student team. Its readiness score changes ranking, never access.</p><div className="actions"><button onClick={() => setPublicationOpen(false)}>Keep editing</button><button className="primary" onClick={confirmPublish}>Publish task</button></div></section></div>}
+    {publicationOpen && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="publish-title"><div className="eyebrow">{t('humanConfirmation')}</div><h2 id="publish-title">{t('publishQuestion')}</h2><p>{t('publishLead', { title: displayTitle(draft, t('notSpecified')) })}</p><div className="actions"><button onClick={() => setPublicationOpen(false)}>{t('keepEditing')}</button><button className="primary" onClick={confirmPublish}>{t('publishTask')}</button></div></section></div>}
 
-    {selectedTask && <div className="modal-backdrop" role="presentation"><section className="modal proposal-modal" role="dialog" aria-modal="true" aria-labelledby="proposal-title"><div className="eyebrow">STUDENT PROPOSAL</div><h2 id="proposal-title">{displayTitle(selectedTask)}</h2><dl className="task-details">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{String(selectedTask[field.key]) || 'Not specified — requires clarification'}</dd></div>)}</dl><ScorePanel task={selectedTask} /><p>Choose your own team and provide the complete proposal for business review.</p><form onSubmit={submitProposal}><label><span>Student team</span><select value={proposalTeamId} onChange={(event) => setProposalTeamId(event.target.value)}><option value="">Choose a team</option>{seedTeams.map((team) => <option key={team.id} value={team.id}>{team.name} — {team.skills.join(', ')}</option>)}</select></label><label><span>Solution idea</span><textarea value={proposalDraft.solutionIdea} onChange={(event) => setProposalDraft({ ...proposalDraft, solutionIdea: event.target.value })} /></label><label><span>Plan</span><textarea value={proposalDraft.plan} onChange={(event) => setProposalDraft({ ...proposalDraft, plan: event.target.value })} /></label><label><span>Timeline</span><input value={proposalDraft.timeline} onChange={(event) => setProposalDraft({ ...proposalDraft, timeline: event.target.value })} placeholder="For example: 3 days" /></label><label><span>Prototype URL</span><input type="url" value={proposalDraft.prototypeUrl} onChange={(event) => setProposalDraft({ ...proposalDraft, prototypeUrl: event.target.value })} placeholder="https://…" /></label>{proposalError && <div className="inline-message">{proposalError}</div>}<div className="actions"><button type="button" onClick={() => setSelectedTaskId(null)}>Cancel</button><button className="primary" type="submit">Submit for business review</button></div></form></section></div>}
+    {selectedTask && <div className="modal-backdrop" role="presentation"><section className="modal proposal-modal" role="dialog" aria-modal="true" aria-labelledby="proposal-title"><div className="eyebrow">{t('studentProposal')}</div><h2 id="proposal-title">{displayTitle(selectedTask, t('notSpecified'))}</h2><dl className="task-details">{getTaskFields(locale).map(field => <div key={field.key}><dt>{field.label}</dt><dd>{String(selectedTask[field.key]) || t('notSpecifiedClarify')}</dd></div>)}</dl><ScorePanel task={selectedTask} locale={locale} /><p>{t('chooseTeamLead')}</p><form onSubmit={submitProposal}><label><span>{t('studentTeam')}</span><select value={proposalTeamId} onChange={(event) => setProposalTeamId(event.target.value)}><option value="">{t('chooseTeam')}</option>{seedTeams.map((team) => <option key={team.id} value={team.id}>{team.name} — {team.skills.join(', ')}</option>)}</select></label><label><span>{t('solutionIdea')}</span><textarea value={proposalDraft.solutionIdea} onChange={(event) => setProposalDraft({ ...proposalDraft, solutionIdea: event.target.value })} /></label><label><span>{t('plan')}</span><textarea value={proposalDraft.plan} onChange={(event) => setProposalDraft({ ...proposalDraft, plan: event.target.value })} /></label><label><span>{t('timeline')}</span><input value={proposalDraft.timeline} onChange={(event) => setProposalDraft({ ...proposalDraft, timeline: event.target.value })} placeholder={t('timelinePlaceholder')} /></label><label><span>{t('prototype')}</span><input type="url" value={proposalDraft.prototypeUrl} onChange={(event) => setProposalDraft({ ...proposalDraft, prototypeUrl: event.target.value })} placeholder={t('prototypePlaceholder')} /></label>{proposalError && <div className="inline-message">{proposalError}</div>}<div className="actions"><button type="button" onClick={() => setSelectedTaskId(null)}>{t('cancel')}</button><button className="primary" type="submit">{t('submitReview')}</button></div></form></section></div>}
   </div>;
 }

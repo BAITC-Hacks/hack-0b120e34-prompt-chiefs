@@ -1,49 +1,25 @@
-import type { TaskCard } from '../types/domain';
+import { createTranslator, type Locale } from '../lib/i18n';
 import { scoreTask } from '../lib/scoring';
+import type { TaskCard } from '../types/domain';
 
-export function ScorePanel({ task }: { task: TaskCard }) {
+const tips: Record<Locale, string[]> = {
+  en: ['Add a clear context and need.', 'Specify available data or materials.', 'Describe the expected result.', 'Add measurable success criteria.', 'State constraints and risks.', 'Name the users or audience.', 'Add a business contact and interaction format.'],
+  ru: ['Добавьте понятный контекст и потребность.', 'Укажите доступные данные или материалы.', 'Опишите ожидаемый результат.', 'Добавьте измеримые критерии успеха.', 'Укажите ограничения и риски.', 'Назовите пользователей или аудиторию.', 'Добавьте контакт и формат связи с бизнесом.'],
+  kk: ['Нақты контекст пен қажеттілікті қосыңыз.', 'Қолжетімді деректер мен материалдарды көрсетіңіз.', 'Күтілетін нәтижені сипаттаңыз.', 'Өлшенетін жетістік критерийлерін қосыңыз.', 'Шектеулер мен тәуекелдерді жазыңыз.', 'Пайдаланушыларды не аудиторияны атаңыз.', 'Бизнес контактісі мен байланыс форматын қосыңыз.'],
+};
+
+export function ScorePanel({ task, locale }: { task: TaskCard; locale: Locale }) {
   const score = scoreTask(task);
-  const levelLabels = { DRAFT: 'ЧЕРНОВИК', WORKING: 'РАБОЧАЯ', READY: 'ГОТОВАЯ', PRIORITY: 'ПРИОРИТЕТНАЯ' } as const;
-  const criterionLabels = {
-    contextAndNeed: 'Контекст и потребность',
-    dataAndMaterials: 'Данные и материалы',
-    expectedResult: 'Ожидаемый результат',
-    successCriteria: 'Критерии успеха',
-    constraints: 'Ограничения',
-    users: 'Пользователи',
-    businessInteraction: 'Связь с бизнесом',
-  } as const;
-  const tips = {
-    contextAndNeed: 'Опишите текущую ситуацию и то, что необходимо изменить.',
-    dataAndMaterials: 'Укажите доступные данные, примеры, документы или источники.',
-    expectedResult: 'Опишите конкретный результат, который должна передать команда.',
-    successCriteria: 'Добавьте измеримые критерии приёмки или целевые показатели.',
-    constraints: 'Укажите сроки, технологии, доступы и другие границы.',
-    users: 'Скажите, кто будет использовать решение и кому оно поможет.',
-    businessInteraction: 'Добавьте контакт и формат консультаций или обратной связи.',
-  } as const;
-  const rows = [
-    ['contextAndNeed', criterionLabels.contextAndNeed, 20],
-    ['dataAndMaterials', criterionLabels.dataAndMaterials, 20],
-    ['expectedResult', criterionLabels.expectedResult, 15],
-    ['successCriteria', criterionLabels.successCriteria, 15],
-    ['constraints', criterionLabels.constraints, 10],
-    ['users', criterionLabels.users, 10],
-    ['businessInteraction', criterionLabels.businessInteraction, 10],
+  const t = createTranslator(locale);
+  const criteria = [
+    { key: 'contextAndNeed', label: t('contextNeed'), weight: 20 },
+    { key: 'dataAndMaterials', label: t('dataMaterials'), weight: 20 },
+    { key: 'expectedResult', label: t('expectedResult'), weight: 15 },
+    { key: 'successCriteria', label: t('successCriteria'), weight: 15 },
+    { key: 'constraints', label: t('constraints'), weight: 10 },
+    { key: 'users', label: t('users'), weight: 10 },
+    { key: 'businessInteraction', label: t('businessInteraction'), weight: 10 },
   ] as const;
-  const potential = score.total + score.missing.reduce((total, item) => total + item.points, 0);
-
-  return <aside className="panel score-panel">
-    <div className="eyebrow">{task.published ? 'ПОДТВЕРЖДЁННАЯ ГОТОВНОСТЬ' : 'ПРЕДВАРИТЕЛЬНАЯ ОЦЕНКА · ПОДТВЕРДИТЕ ПЕРЕД ПУБЛИКАЦИЕЙ'}</div>
-    <div className="score-row"><strong>{score.total}</strong><span>/100</span><b className={`pill ${score.level.toLowerCase()}`}>{levelLabels[score.level]}</b></div>
-    <div className="progress"><span style={{ width: `${score.total}%` }} /></div>
-    <div className="potential"><span>Текущий рейтинг</span><b>{score.total} → потенциально {potential}</b></div>
-    <div className="score-breakdown"><h3>Расшифровка рейтинга</h3>{rows.map(([key, label, possible]) => <div className="breakdown-row" key={key}><span>{label}</span><b>{score.breakdown[key]}/{possible}</b></div>)}</div>
-    {score.missing.length > 0 ? <>
-      <h3>Что быстрее повысит рейтинг</h3>
-      {score.missing.map((item) => <div className="tip" key={item.key}>
-        <b>+{item.points} · {criterionLabels[item.key]}</b><span>{tips[item.key]}</span>
-      </div>)}
-    </> : <div className="perfect">Задача готова к работе со студенческими командами.</div>}
-  </aside>;
+  const level = score.level === 'DRAFT' ? t('draft') : score.level === 'WORKING' ? t('working') : score.level === 'READY' ? t('ready') : t('priority');
+  return <aside className="panel score-panel"><div className="eyebrow">{task.published ? t('scoreConfirmed') : t('scorePreview')}</div><div className="score-row"><strong>{score.total}</strong><span>/ 100</span><b className={`pill ${score.level.toLowerCase()}`}>{level}</b></div><div className="progress" aria-label={`${t('currentScore')}: ${score.total} / 100`}><span style={{ width: `${score.total}%` }} /></div><div className="potential"><b>{score.total} / 100</b><span>{t('currentScore')} · {100 - score.total} {t('potential')}</span></div><section className="score-breakdown"><h3>{t('scoreBreakdown')}</h3>{criteria.map((item) => <div className="breakdown-row" key={item.key}><span>{item.label}</span><b>{score.breakdown[item.key]}/{item.weight}</b></div>)}</section>{score.missing.length > 0 ? <section className="score-breakdown"><h3>{t('fastestImprove')}</h3>{score.missing.map((item, index) => <div className="tip" key={item.key}><b>+{item.points}</b><span>{tips[locale][index] ?? item.label}</span></div>)}</section> : <p className="perfect">{t('taskReady')}</p>}</aside>;
 }
