@@ -1,9 +1,13 @@
-import type { Proposal, TaskCard } from '../types/domain';
+import type { Proposal, ProposalStatus, TaskCard } from '../types/domain';
 import { seedProposals, seedTasks } from '../data/seed';
-import { assertFinalizedProposalsPreserved, isConfirmedProgress, isIsoTimestamp, isProposalStatus } from './proposals';
+import {
+  assertFinalizedProposalsPreserved, changeProposalStatus, CONFIRMED_PROGRESS_POINTS,
+  confirmProposalProgress as confirmProgress, isConfirmedProgress, isIsoTimestamp, isProposalStatus,
+} from './proposals';
 
 const TASKS = 'aisana.tasks.v1';
 const PROPOSALS = 'aisana.proposals.v1';
+export const PROGRESS_POINTS = CONFIRMED_PROGRESS_POINTS;
 
 export let storageWarning = '';
 const warnings = new Map<string, string>();
@@ -114,6 +118,24 @@ export const loadProposals = (): Proposal[] => load(PROPOSALS, seedProposals, pa
 export const saveProposals = (items: Proposal[]): boolean => save(PROPOSALS, items, parseProposal, next => {
   assertFinalizedProposalsPreserved(loadProposals(), next);
 });
+
+// List-level helpers over proposals.ts: a refused transition leaves the proposal unchanged.
+function updateProposal(items: Proposal[], proposalId: string, change: (proposal: Proposal) => Proposal): Proposal[] {
+  return items.map((proposal) => {
+    if (proposal.id !== proposalId) return proposal;
+    try { return change(proposal); } catch { return proposal; }
+  });
+}
+
+/** A proposal that earned progress points is a final business decision. */
+export function setProposalStatus(items: Proposal[], proposalId: string, status: ProposalStatus): Proposal[] {
+  return updateProposal(items, proposalId, (proposal) => changeProposalStatus(proposal, status));
+}
+
+/** Adds progress only once, and only after the business accepted the proposal. */
+export function confirmProposalProgress(items: Proposal[], proposalId: string, evidence: string, confirmedAt = new Date().toISOString()): Proposal[] {
+  return updateProposal(items, proposalId, (proposal) => confirmProgress(proposal, evidence, confirmedAt));
+}
 
 // The only intentional override of finalized progress, initiated by Reset demo data.
 export function resetDemoData() {

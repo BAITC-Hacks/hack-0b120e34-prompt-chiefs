@@ -1,4 +1,16 @@
-import type { TaskCard, TaskScore, ReadinessLevel } from '../types/domain';
+import type { ReadinessLevel, ScoreBreakdown, TaskCard, TaskScore } from '../types/domain';
+
+type ScoreRule = Readonly<{ label: string; points: number; tip: string }>;
+
+export const SCORE_RULES: Readonly<Record<keyof ScoreBreakdown, ScoreRule>> = Object.freeze({
+  contextAndNeed: Object.freeze({ label: 'Context & need', points: 20, tip: 'Explain the current situation and what must change.' }),
+  dataAndMaterials: Object.freeze({ label: 'Data & materials', points: 20, tip: 'List available datasets, examples, documents or data sources.' }),
+  expectedResult: Object.freeze({ label: 'Expected result', points: 15, tip: 'Describe the concrete deliverable the team should produce.' }),
+  successCriteria: Object.freeze({ label: 'Success criteria', points: 15, tip: 'Add measurable acceptance criteria or target metrics.' }),
+  constraints: Object.freeze({ label: 'Constraints', points: 10, tip: 'Add deadlines, required technologies, access limits or other boundaries.' }),
+  users: Object.freeze({ label: 'Users', points: 10, tip: 'State who will use or benefit from the solution.' }),
+  businessInteraction: Object.freeze({ label: 'Business interaction', points: 10, tip: 'Add a contact and consultation/feedback format.' }),
+});
 
 // A deterministic completeness heuristic, not verification of business facts.
 // Shared with the offline Doctor so its questions use exactly the same thresholds.
@@ -21,34 +33,25 @@ export function readinessLevel(score: number): ReadinessLevel {
   return 'DRAFT';
 }
 
+/**
+ * A pure completeness calculation. It only inspects card text and never calls AI,
+ * reads storage, uses time, or changes the supplied task.
+ */
 export function scoreTask(task: TaskCard): TaskScore {
-  const breakdown = {
-    contextAndNeed: isFieldComplete('context', task.context) && isFieldComplete('need', task.need) ? 20 : 0,
-    dataAndMaterials: isFieldComplete('data', task.data) ? 20 : 0,
-    expectedResult: isFieldComplete('expectedResult', task.expectedResult) ? 15 : 0,
-    successCriteria: isFieldComplete('successCriteria', task.successCriteria) ? 15 : 0,
-    constraints: isFieldComplete('constraints', task.constraints) ? 10 : 0,
-    users: isFieldComplete('users', task.users) ? 10 : 0,
-    businessInteraction: isFieldComplete('contact', task.contact) && isFieldComplete('interactionFormat', task.interactionFormat) ? 10 : 0,
+  const breakdown: ScoreBreakdown = {
+    contextAndNeed: isFieldComplete('context', task?.context) && isFieldComplete('need', task?.need) ? SCORE_RULES.contextAndNeed.points : 0,
+    dataAndMaterials: isFieldComplete('data', task?.data) ? SCORE_RULES.dataAndMaterials.points : 0,
+    expectedResult: isFieldComplete('expectedResult', task?.expectedResult) ? SCORE_RULES.expectedResult.points : 0,
+    successCriteria: isFieldComplete('successCriteria', task?.successCriteria) ? SCORE_RULES.successCriteria.points : 0,
+    constraints: isFieldComplete('constraints', task?.constraints) ? SCORE_RULES.constraints.points : 0,
+    users: isFieldComplete('users', task?.users) ? SCORE_RULES.users.points : 0,
+    businessInteraction: isFieldComplete('contact', task?.contact) && isFieldComplete('interactionFormat', task?.interactionFormat) ? SCORE_RULES.businessInteraction.points : 0,
   };
 
-  const total = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
-  const checks = [
-    ['contextAndNeed', 'Context & need', 20, 'Explain the current situation and what must change.'],
-    ['dataAndMaterials', 'Data & materials', 20, 'List available datasets, examples, documents or data sources.'],
-    ['expectedResult', 'Expected result', 15, 'Describe the concrete deliverable the team should produce.'],
-    ['successCriteria', 'Success criteria', 15, 'Add measurable acceptance criteria or target metrics.'],
-    ['constraints', 'Constraints', 10, 'Add deadlines, required technologies, access limits or other boundaries.'],
-    ['users', 'Users', 10, 'State who will use or benefit from the solution.'],
-    ['businessInteraction', 'Business interaction', 10, 'Add a contact and consultation/feedback format.'],
-  ] as const;
+  const total = Object.values(breakdown).reduce((sum, points) => sum + points, 0);
+  const missing = (Object.keys(SCORE_RULES) as (keyof ScoreBreakdown)[])
+    .filter((key) => breakdown[key] === 0)
+    .map((key) => ({ key, ...SCORE_RULES[key] }));
 
-  return {
-    total,
-    level: readinessLevel(total),
-    breakdown,
-    missing: checks
-      .filter(([key]) => breakdown[key] === 0)
-      .map(([key, label, points, tip]) => ({ key, label, points, tip })),
-  };
+  return { total, level: readinessLevel(total), breakdown, missing };
 }
