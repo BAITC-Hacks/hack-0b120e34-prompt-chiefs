@@ -6,6 +6,7 @@ import { stripTypeScriptTypes } from 'node:module';
 // Compile the actual application modules in memory; no alternate business logic.
 const cache = new Map();
 function moduleUrl(path) {
+  path = new URL(path, import.meta.url).href;
   if (cache.has(path)) return cache.get(path);
   const source = fs.readFileSync(new URL(path, import.meta.url), 'utf8').replaceAll('import.meta.env', 'globalThis.__testEnv');
   const output = stripTypeScriptTypes(source).replace(/from ['"]([^'"]+)['"]/g, (_match, name) => `from '${moduleUrl(new URL(`${name}.ts`, new URL(path, import.meta.url)).href)}'`);
@@ -17,6 +18,27 @@ const seed = await import(moduleUrl('../src/data/seed.ts'));
 const scoring = await import(moduleUrl('../src/lib/scoring.ts'));
 const ai = await import(moduleUrl('../src/lib/ai.ts'));
 const storage = await import(moduleUrl('../src/lib/storage.ts'));
+const proposals = await import(moduleUrl('../src/lib/proposals.ts'));
+
+function installStorage(t) {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const values = new Map();
+  const browserStorage = {
+    getItem: key => values.get(key) ?? null,
+    setItem: (key, value) => values.set(key, value),
+  };
+  Object.defineProperty(globalThis, 'localStorage', { configurable: true, writable: true, value: browserStorage });
+  storage.resetDemoData();
+  values.clear();
+  t.after(() => {
+    browserStorage.setItem = (key, value) => values.set(key, value);
+    browserStorage.getItem = key => values.get(key) ?? null;
+    storage.resetDemoData();
+    if (descriptor) Object.defineProperty(globalThis, 'localStorage', descriptor);
+    else delete globalThis.localStorage;
+  });
+  return { values, browserStorage };
+}
 
 test('five complete datasets, valid references and all readiness levels', () => {
   for (const items of [seed.seedTasks, seed.seedDrafts, seed.seedTeams, seed.seedProposals]) assert.ok(items.length >= 5);
@@ -71,9 +93,8 @@ test('AI falls back on malformed, short, unsafe, HTTP and network responses', as
     assert.equal((await ai.createAiAdapter().getClarifyingQuestions(seed.blankTask()))[0].id, 'live-1');
   } finally { globalThis.fetch = original; globalThis.__testEnv = {}; }
 });
-test('storage tolerates corruption and preserves confirmed progress', () => {
-  const values = new Map();
-  globalThis.localStorage = {getItem:key=>values.get(key) ?? null,setItem:(key,value)=>values.set(key,value)};
+test('storage tolerates corruption and preserves confirmed progress', t => {
+  const { values } = installStorage(t);
   assert.equal(storage.loadTasks().length, 5);
   values.set('aisana.tasks.v1', '{broken');
   assert.equal(storage.loadTasks().length, 5);
@@ -87,4 +108,289 @@ test('storage tolerates corruption and preserves confirmed progress', () => {
   globalThis.localStorage.setItem = () => {throw Error('quota')};
   assert.doesNotThrow(()=>storage.saveTasks(seed.seedTasks));
   assert.match(storage.storageWarning, /session only/);
+});
+
+test('score ignores supplied scores and metadata, never mutates inputs and stays in range', () => {
+  const original = Object.freeze({ ...seed.blankTask(), score: 100, rating: 100, breakdown: { users: 100 } });
+  assert.equal(scoring.scoreTask(original).total, 0);
+  const fields = Object.keys(scoring.FIELD_MIN_LENGTH);
+  // Exercise all 512 presence combinations, including the paired categories.
+  for (let mask = 0; mask < 2 ** fields.length; mask++) {
+    const task = { ...seed.seedTasks[0] };
+    fields.forEach((field, bit) => { if (!(mask & (1 << bit))) task[field] = ''; });
+    const result = scoring.scoreTask(Object.freeze(task));
+    assert.ok(Number.isInteger(result.total) && result.total >= 0 && result.total <= 100);
+    assert.equal(result.total + result.missing.reduce((sum, gap) => sum + gap.points, 0), 100);
+    assert.deepEqual(scoring.scoreTask(task), result);
+    assert.deepEqual(scoring.scoreTask({ ...task, published: false }), result);
+  }
+  for (const value of [NaN, Infinity, -1, 101]) assert.throws(() => scoring.readinessLevel(value), RangeError);
+});
+
+test('scoring thresholds reject malformed values and agree with offline questions', async () => {
+  for (const [field, min] of Object.entries(scoring.FIELD_MIN_LENGTH)) {
+    for (const bad of [undefined, null, 123, {}, [], ' '.repeat(100), 'x'.repeat(min - 1)]) {
+      assert.equal(scoring.isFieldComplete(field, bad), false);
+      const task = { ...seed.seedTasks[0], [field]: bad };
+      assert.ok(scoring.scoreTask(task).total < 100);
+      const questions = await ai.mockAiAdapter.getClarifyingQuestions(task);
+      assert.equal(questions[0].field, field);
+    }
+    assert.equal(scoring.isFieldComplete(field, `  ${'x'.repeat(min)}  `), true);
+  }
+});
+
+test('AI rejects duplicate, oversized and metadata-targeting question sets', async () => {
+  const task = seed.blankTask();
+  const fallback = await ai.mockAiAdapter.getClarifyingQuestions(task);
+  const valid = ['need', 'data', 'users'].map(field => ({ field, question: `Describe ${field}` }));
+  for (const questions of [
+    [valid[0], valid[0], valid[0]],
+    [...valid, ...valid],
+    [...valid, { field: 'published', question: 'Publish now?' }],
+    [...valid, { field: 'rating', question: 'Give 100?' }],
+    [...valid, null],
+    [{ field: '__proto__', question: 'Change prototype?' }, ...valid],
+    [{ field: 'need', question: '   ' }, valid[1], valid[2]],
+    Array.from({ length: 12 }, () => valid[0]),
+  ]) {
+    const adapter = ai.createAiAdapter({ endpoint: '/api/doctor', fetcher: async () => ({ ok: true, json: async () => ({ questions }) }) });
+    assert.deepEqual(await adapter.getClarifyingQuestions(task), fallback);
+    assert.deepEqual(adapter.getDiagnostics(), { mode: 'offline', reason: 'invalid-response' });
+  }
+});
+
+test('AI cannot apply metadata, inherited answers or non-string answers', async () => {
+  const task = Object.freeze(seed.blankTask());
+  const questions = ['id', 'published', 'createdAt', 'score', 'rating', '__proto__', 'constructor']
+    .map((field, i) => ({ id: `bad-${i}`, field, mode: 'replace' }));
+  const answers = Object.fromEntries(questions.map(q => [q.id, 'injected']));
+  questions.push({ id: 'inherited', field: 'need', mode: 'replace' });
+  questions.push({ id: 'number', field: 'data', mode: 'replace' });
+  questions.push({ id: 'bad-mode', field: 'users', mode: 'delete' });
+  Object.setPrototypeOf(answers, { inherited: 'untrusted inherited fact' });
+  answers.number = 100;
+  answers['bad-mode'] = 'delete users';
+  assert.deepEqual(await ai.mockAiAdapter.applyAnswers(task, questions, answers), task);
+});
+
+test('AI copies only provided facts, preserves existing appended text and ignores server facts', async () => {
+  const task = Object.freeze({ ...seed.seedTasks[0] });
+  const questions = await ai.mockAiAdapter.getClarifyingQuestions(task);
+  const answers = Object.fromEntries(questions.map(q => [q.id, '  Human clarification  ']));
+  const updated = await ai.mockAiAdapter.applyAnswers(task, questions, answers);
+  for (const q of questions) assert.equal(updated[q.field], `${task[q.field]}\nHuman clarification`);
+  const adapter = ai.createAiAdapter({ endpoint: '/api/doctor', fetcher: async (_url, options) => {
+    const input = JSON.parse(options.body);
+    assert.equal(input.prompt, ai.AI_PROMPT);
+    for (const key of ['published', 'createdAt', 'id', 'score', 'teams']) assert.equal(Object.hasOwn(input.task, key), false);
+    return { ok: true, json: async () => ({
+      questions: ['need', 'data', 'users'].map(field => ({ field, question: `Describe ${field}` })),
+      suggestedFields: { data: 'Invented dataset', published: true }, score: 100,
+    }) };
+  } });
+  const draft = { ...seed.blankTask(), score: 100, teams: [{ name: 'Private' }] };
+  const live = await adapter.getClarifyingQuestions(draft);
+  assert.deepEqual(await adapter.applyAnswers(draft, live, {}), draft);
+  assert.deepEqual(adapter.getDiagnostics(), { mode: 'live', reason: 'success' });
+  adapter.getDiagnostics().mode = 'offline';
+  assert.equal(adapter.getDiagnostics().mode, 'live');
+});
+
+test('AI reports offline, HTTP, invalid JSON and network fallback explicitly', async () => {
+  assert.deepEqual(ai.createAiAdapter({ endpoint: '' }).getDiagnostics(), { mode: 'offline', reason: 'not-configured' });
+  for (const [fetcher, reason] of [
+    [async () => ({ ok: false }), 'http'],
+    [async () => ({ ok: true, json: async () => { throw Error('bad JSON'); } }), 'invalid-response'],
+    [async () => { throw Error('offline'); }, 'network'],
+  ]) {
+    const adapter = ai.createAiAdapter({ endpoint: '/api/doctor', fetcher });
+    assert.equal((await adapter.getClarifyingQuestions(seed.blankTask())).length, 3);
+    assert.deepEqual(adapter.getDiagnostics(), { mode: 'offline', reason });
+  }
+});
+
+test('AI aborts a slow request and a slow JSON body, then recovers on a later request', async () => {
+  for (const slowBody of [false, true]) {
+    let signal;
+    let calls = 0;
+    const adapter = ai.createAiAdapter({
+      endpoint: '/api/doctor', timeoutMs: 10,
+      fetcher: async (_url, options) => {
+        if (calls++) return { ok: true, json: async () => ({ questions: ['need', 'data', 'users'].map(field => ({ field, question: `Describe ${field}` })) }) };
+        signal = options.signal;
+        const pending = () => new Promise((_resolve, reject) => signal.addEventListener('abort', () => reject(Error('aborted')), { once: true }));
+        return slowBody ? { ok: true, json: pending } : pending();
+      },
+    });
+    assert.equal((await adapter.getClarifyingQuestions(seed.blankTask())).length, 3);
+    assert.equal(signal.aborted, true);
+    assert.deepEqual(adapter.getDiagnostics(), { mode: 'offline', reason: 'timeout' });
+    assert.equal((await adapter.getClarifyingQuestions(seed.blankTask()))[0].id, 'live-1');
+    assert.equal(adapter.getDiagnostics().mode, 'live');
+  }
+});
+
+test('manual decisions are independent, do not award points and can change before confirmation', () => {
+  const first = Object.freeze({ ...seed.seedProposals[0] });
+  const second = Object.freeze({ ...seed.seedProposals[1] });
+  const accepted = proposals.changeProposalStatus(first, 'ACCEPTED');
+  assert.equal(accepted.progress, undefined);
+  assert.equal(first.status, 'PENDING');
+  assert.equal(second.status, 'PENDING');
+  assert.equal(proposals.changeProposalStatus(second, 'ACCEPTED').status, 'ACCEPTED');
+  assert.equal(proposals.changeProposalStatus(accepted, 'REJECTED').status, 'REJECTED');
+  assert.equal(proposals.canChangeProposalStatus(accepted), true);
+  assert.throws(() => proposals.changeProposalStatus(first, 'UNKNOWN'), /status/);
+});
+
+test('progress requires acceptance, evidence and a valid timestamp', () => {
+  const proposal = seed.seedProposals[0];
+  for (const status of ['PENDING', 'REJECTED']) {
+    assert.throws(() => proposals.confirmProposalProgress({ ...proposal, status }, 'Result verified'), /Accept/);
+  }
+  const accepted = proposals.changeProposalStatus(proposal, 'ACCEPTED');
+  for (const evidence of ['', '  ', null, 10]) {
+    assert.throws(() => proposals.confirmProposalProgress(accepted, evidence), /evidence/);
+  }
+  for (const date of ['', 'yesterday', '2026-02-30T10:00:00.000Z']) {
+    assert.throws(() => proposals.confirmProposalProgress(accepted, 'Verified', date), /timestamp/);
+  }
+});
+
+test('confirmed +10 is idempotent and final, including after persistence and reload', t => {
+  installStorage(t);
+  const accepted = proposals.changeProposalStatus(seed.seedProposals[0], 'ACCEPTED');
+  const confirmed = proposals.confirmProposalProgress(accepted, '  Business verified prototype  ', '2026-09-23T10:00:00.000Z');
+  assert.equal(accepted.progress, undefined);
+  assert.equal(confirmed.progress.points, 10);
+  assert.equal(confirmed.progress.evidence, 'Business verified prototype');
+  assert.equal(proposals.canChangeProposalStatus(confirmed), false);
+  assert.equal(storage.saveProposals([confirmed]), true);
+  const [reloaded] = storage.loadProposals();
+  for (const status of ['PENDING', 'REJECTED']) {
+    assert.throws(() => proposals.changeProposalStatus(reloaded, status), /final/);
+  }
+  const repeated = proposals.confirmProposalProgress(reloaded, 'Replace evidence', '2026-09-24T10:00:00.000Z');
+  assert.deepEqual(repeated, confirmed);
+  assert.deepEqual(proposals.changeProposalStatus(reloaded, 'ACCEPTED'), confirmed);
+  assert.equal(storage.saveProposals([repeated]), true);
+  assert.equal(storage.loadProposals().reduce((sum, p) => sum + (p.progress?.points ?? 0), 0), 10);
+});
+
+test('storage refuses bypasses that reject, erase, reassign or rewrite confirmed progress', t => {
+  const { values } = installStorage(t);
+  const confirmed = proposals.confirmProposalProgress(proposals.changeProposalStatus(seed.seedProposals[0], 'ACCEPTED'), 'Verified stage');
+  storage.saveProposals([confirmed]);
+  const before = values.get('aisana.proposals.v1');
+  for (const items of [
+    [], [{ ...confirmed, status: 'REJECTED' }], [{ ...confirmed, progress: undefined }],
+    [{ ...confirmed, teamId: 'team2' }], [{ ...confirmed, taskId: 't2' }],
+    [{ ...confirmed, progress: { ...confirmed.progress, evidence: 'Rewritten' } }],
+    [{ ...confirmed, progress: { ...confirmed.progress, points: 20 } }],
+    [{ ...confirmed, progress: { ...confirmed.progress, confirmedAt: '2026-09-24T10:00:00.000Z' } }],
+  ]) {
+    assert.equal(storage.saveProposals(items), false);
+    assert.match(storage.storageWarning, /not saved/);
+    assert.equal(values.get('aisana.proposals.v1'), before);
+    assert.deepEqual(storage.loadProposals(), [confirmed]);
+  }
+  const reset = storage.resetDemoData();
+  assert.deepEqual(storage.loadProposals(), reset.proposals);
+  assert.ok(reset.proposals.every(proposal => !proposal.progress));
+});
+
+test('storage rejects malformed lists, duplicate IDs, dates and impossible progress without overwriting raw data', t => {
+  const { values } = installStorage(t);
+  const task = seed.seedTasks[0];
+  const proposal = seed.seedProposals[0];
+  const progress = { evidence: 'Verified', confirmedAt: '2026-09-23T10:00:00.000Z', points: 10 };
+  for (const [key, read, fallback, invalid] of [
+    ['aisana.tasks.v1', storage.loadTasks, seed.seedTasks, [null, {}, [null], [task, task], [{ ...task, id: ' ' }], [{ ...task, createdAt: 'not a date' }], [{ ...task, context: 42 }]]],
+    ['aisana.proposals.v1', storage.loadProposals, seed.seedProposals, [
+      [proposal, proposal], [{ ...proposal, progress }], [{ ...proposal, status: 'REJECTED', progress }],
+      ...[null, { ...progress, evidence: ' ' }, { ...progress, confirmedAt: 'invalid' }, { ...progress, points: 20 }]
+        .map(progress => [{ ...proposal, status: 'ACCEPTED', progress }]),
+      [{ ...proposal, prototypeUrl: 'javascript:alert(1)' }], [{ ...proposal, prototypeUrl: 'ftp://example.com' }],
+      [{ ...proposal, plan: ' ' }], [{ ...proposal, teamId: '' }], [{ ...proposal, status: 'OTHER' }],
+    ]],
+  ]) {
+    for (const value of invalid) {
+      const raw = JSON.stringify(value);
+      values.set(key, raw);
+      assert.deepEqual(read(), fallback);
+      assert.match(storage.storageWarning, /could not be read/);
+      assert.equal(values.get(key), raw);
+    }
+  }
+});
+
+test('storage strips untrusted derived fields, accepts zero-score tasks and preserves empty lists', t => {
+  const { values } = installStorage(t);
+  const task = { ...seed.blankTask(), published: true };
+  values.set('aisana.tasks.v1', JSON.stringify([{ ...task, score: 100, rating: 100, teams: ['injected'] }]));
+  assert.deepEqual(storage.loadTasks(), [task]);
+  assert.equal(scoring.scoreTask(storage.loadTasks()[0]).total, 0);
+  assert.equal(storage.saveTasks([task]), true);
+  assert.equal(storage.saveTasks([{ ...task, id: '' }]), false);
+  assert.deepEqual(storage.loadTasks(), [task]);
+  assert.equal(storage.saveTasks([]), true);
+  assert.equal(storage.saveProposals([]), true);
+  assert.deepEqual(storage.loadTasks(), []);
+  assert.deepEqual(storage.loadProposals(), []);
+});
+
+test('storage warnings survive unrelated success and clear after recovery', t => {
+  const { values } = installStorage(t);
+  values.set('aisana.tasks.v1', '{broken');
+  storage.loadTasks();
+  storage.loadProposals();
+  assert.match(storage.storageWarning, /could not be read/);
+  assert.equal(storage.saveTasks(seed.seedTasks), true);
+  assert.equal(storage.storageWarning, '');
+});
+
+test('unavailable storage retains session changes and finalized progress, then recovers', t => {
+  const { browserStorage, values } = installStorage(t);
+  browserStorage.getItem = () => { throw Error('SecurityError'); };
+  browserStorage.setItem = () => { throw Error('QuotaExceededError'); };
+  assert.deepEqual(storage.loadTasks(), seed.seedTasks);
+  const task = { ...seed.blankTask(), title: 'Session-only task' };
+  assert.equal(storage.saveTasks([task]), false);
+  assert.match(storage.storageWarning, /session only/);
+  task.title = 'Mutated caller';
+  assert.equal(storage.loadTasks()[0].title, 'Session-only task');
+  const confirmed = proposals.confirmProposalProgress(proposals.changeProposalStatus(seed.seedProposals[0], 'ACCEPTED'), 'Verified stage');
+  assert.equal(storage.saveProposals([confirmed]), false);
+  assert.deepEqual(storage.loadProposals(), [confirmed]);
+  assert.equal(storage.saveProposals([{ ...confirmed, progress: undefined }]), false);
+  assert.deepEqual(storage.loadProposals(), [confirmed]);
+  browserStorage.setItem = (key, value) => values.set(key, value);
+  browserStorage.getItem = key => values.get(key) ?? null;
+  assert.equal(storage.saveTasks(storage.loadTasks()), true);
+  assert.equal(storage.saveProposals(storage.loadProposals()), true);
+  assert.equal(storage.storageWarning, '');
+  assert.deepEqual(JSON.parse(values.get('aisana.proposals.v1')), [confirmed]);
+});
+
+test('reset returns independent snapshots and never mutates seeds', t => {
+  installStorage(t);
+  const before = structuredClone({ tasks: seed.seedTasks, proposals: seed.seedProposals });
+  const first = storage.resetDemoData();
+  first.tasks[0].title = 'Changed in caller';
+  first.proposals[0].status = 'REJECTED';
+  assert.deepEqual(storage.resetDemoData(), before);
+  assert.deepEqual({ tasks: seed.seedTasks, proposals: seed.seedProposals }, before);
+});
+
+test('dependency versions are pinned to the lockfile used by npm ci', () => {
+  const manifest = JSON.parse(fs.readFileSync(new URL('../package.json', import.meta.url)));
+  const lock = JSON.parse(fs.readFileSync(new URL('../package-lock.json', import.meta.url)));
+  for (const section of ['dependencies', 'devDependencies']) {
+    assert.deepEqual(manifest[section], lock.packages[''][section]);
+    for (const [name, version] of Object.entries(manifest[section])) {
+      assert.match(version, /^\d+\.\d+\.\d+$/);
+      assert.equal(lock.packages[`node_modules/${name}`].version, version);
+    }
+  }
 });

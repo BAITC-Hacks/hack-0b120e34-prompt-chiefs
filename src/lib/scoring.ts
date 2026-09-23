@@ -1,8 +1,20 @@
 import type { TaskCard, TaskScore, ReadinessLevel } from '../types/domain';
 
-const present = (value: string, min = 12) => value.trim().length >= min;
+// A deterministic completeness heuristic, not verification of business facts.
+// Shared with the offline Doctor so its questions use exactly the same thresholds.
+export const FIELD_MIN_LENGTH = Object.freeze({
+  context: 20, need: 20, data: 15, expectedResult: 15, successCriteria: 15,
+  constraints: 10, users: 10, contact: 5, interactionFormat: 8,
+});
+
+export function isFieldComplete(field: keyof typeof FIELD_MIN_LENGTH, value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length >= FIELD_MIN_LENGTH[field];
+}
 
 export function readinessLevel(score: number): ReadinessLevel {
+  if (!Number.isFinite(score) || score < 0 || score > 100) {
+    throw new RangeError('Readiness score must be a finite number from 0 to 100.');
+  }
   if (score >= 90) return 'PRIORITY';
   if (score >= 70) return 'READY';
   if (score >= 40) return 'WORKING';
@@ -11,13 +23,13 @@ export function readinessLevel(score: number): ReadinessLevel {
 
 export function scoreTask(task: TaskCard): TaskScore {
   const breakdown = {
-    contextAndNeed: present(task.context, 20) && present(task.need, 20) ? 20 : 0,
-    dataAndMaterials: present(task.data, 15) ? 20 : 0,
-    expectedResult: present(task.expectedResult, 15) ? 15 : 0,
-    successCriteria: present(task.successCriteria, 15) ? 15 : 0,
-    constraints: present(task.constraints, 10) ? 10 : 0,
-    users: present(task.users, 10) ? 10 : 0,
-    businessInteraction: present(task.contact, 5) && present(task.interactionFormat, 8) ? 10 : 0,
+    contextAndNeed: isFieldComplete('context', task.context) && isFieldComplete('need', task.need) ? 20 : 0,
+    dataAndMaterials: isFieldComplete('data', task.data) ? 20 : 0,
+    expectedResult: isFieldComplete('expectedResult', task.expectedResult) ? 15 : 0,
+    successCriteria: isFieldComplete('successCriteria', task.successCriteria) ? 15 : 0,
+    constraints: isFieldComplete('constraints', task.constraints) ? 10 : 0,
+    users: isFieldComplete('users', task.users) ? 10 : 0,
+    businessInteraction: isFieldComplete('contact', task.contact) && isFieldComplete('interactionFormat', task.interactionFormat) ? 10 : 0,
   };
 
   const total = Object.values(breakdown).reduce((sum, value) => sum + value, 0);
