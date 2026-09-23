@@ -44,6 +44,7 @@ export type Team = {
 
 export type ProposalStatus = 'PENDING' | 'ACCEPTED' | 'REJECTED';
 export type Proposal = {
+  progress?: { evidence: string; confirmedAt: string; points: number };
   id: string;
   taskId: string;
   teamId: string;

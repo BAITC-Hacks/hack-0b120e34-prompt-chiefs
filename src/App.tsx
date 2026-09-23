@@ -2,10 +2,10 @@ import { FormEvent, useMemo, useState } from 'react';
 import { blankTask, feedbackAnalysisDemo, seedTeams } from './data/seed';
 import { createAiAdapter, type ClarifyingQuestion } from './lib/ai';
 import { scoreTask } from './lib/scoring';
-import { loadProposals, loadTasks, resetDemoData, saveProposals, saveTasks } from './lib/storage';
+import { loadProposals, loadTasks, resetDemoData, saveProposals, saveTasks, storageWarning } from './lib/storage';
 import type { Proposal, TaskCard } from './types/domain';
 import { ScorePanel } from './components/ScorePanel';
-import { TaskEditor } from './components/TaskEditor';
+import { TaskEditor, fields } from './components/TaskEditor';
 import './styles.css';
 
 type View = 'catalog' | 'builder' | 'proposals';
@@ -34,6 +34,8 @@ export default function App() {
   const [proposalError, setProposalError] = useState('');
   const [levelFilter, setLevelFilter] = useState('ALL');
   const [industryFilter, setIndustryFilter] = useState('ALL');
+  const [progressEvidence, setProgressEvidence] = useState<Record<string, string>>({});
+  const [decisionTask, setDecisionTask] = useState('ALL');
 
   const catalog = useMemo(
     () => [...tasks].filter((task) => task.published).sort((a, b) => scoreTask(b).total - scoreTask(a).total),
@@ -97,6 +99,11 @@ export default function App() {
   }
 
   function confirmPublish() {
+    if (!draft.title.trim() || !draft.context.trim()) {
+      setBuilderError('Provide a title and business description. Other missing details lower readiness but do not prevent publication.');
+      setPublicationOpen(false);
+      return;
+    }
     const next = { ...draft, published: true };
     const updated = [...tasks.filter((task) => task.id !== next.id), next];
     setTasks(updated);
@@ -107,6 +114,8 @@ export default function App() {
     setQuestions([]);
     setAnswers({});
     setView('catalog');
+    setLevelFilter('ALL');
+    setIndustryFilter('ALL');
   }
 
   function openProposal(taskId: string) {
@@ -123,7 +132,8 @@ export default function App() {
       return;
     }
     try {
-      new URL(proposalDraft.prototypeUrl);
+      const url = new URL(proposalDraft.prototypeUrl);
+      if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported protocol');
     } catch {
       setProposalError('Prototype URL must include http:// or https://.');
       return;
@@ -146,6 +156,23 @@ export default function App() {
     saveProposals(next);
   }
 
+  function confirmProgress(id: string) {
+    const evidence = progressEvidence[id]?.trim();
+    if (!evidence) return;
+    const next = proposals.map(proposal => proposal.id === id && proposal.status === 'ACCEPTED' && !proposal.progress
+      ? { ...proposal, progress: { evidence, confirmedAt: new Date().toISOString(), points: 10 } } : proposal);
+    saveProposals(next);
+    setProposals(next);
+  }
+
+  function editTask(task: TaskCard) {
+    setDraft({ ...task, published: false });
+    setBrief(task.context);
+    setQuestions([]);
+    setAnswers({});
+    openBuilder();
+  }
+
   function resetDemo() {
     const seeded = resetDemoData();
     setTasks(seeded.tasks);
@@ -159,6 +186,7 @@ export default function App() {
   }
 
   return <div className="shell">
+    {storageWarning && <p role="alert" className="inline-message">{storageWarning}</p>}
     <header>
       <button className="brand-button" onClick={() => setView('catalog')}><span className="brand">TASKREADY</span><span>AI Sana business challenge marketplace</span></button>
       <nav aria-label="Primary navigation">
@@ -179,6 +207,7 @@ export default function App() {
           <div className="brief-actions"><button className="secondary" onClick={startFromBrief}>Use this description</button><button className="text-button" onClick={useDemoBrief}>Load feedback-analysis demo</button></div>
         </section>
         <TaskEditor task={draft} onChange={setDraft} />
+        <p>Readiness here is a preview. Only your confirmed version earns points and changes catalog ranking.</p>
         {builderError && <div className="inline-message" role="status">{builderError}</div>}
         <div className="actions">
           <button className="secondary" onClick={askAi} disabled={doctorState === 'loading'}>{doctorState === 'loading' ? 'Task Doctor is reviewing…' : 'AI Task Doctor'}</button>
@@ -198,21 +227,23 @@ export default function App() {
       <div className="hero"><div><div className="eyebrow">OPEN CATALOG</div><h1>Better briefs rise. Every team can still apply.</h1><p className="lede">Readiness changes ordering only. Every business-confirmed challenge remains open to student teams.</p></div><button className="primary" onClick={openBuilder}>Post a challenge</button></div>
       {catalog.length === 0 ? <div className="empty-state"><h2>No published tasks yet</h2><p>Create a task, review it, and use Confirm & publish to add the first challenge.</p><button className="primary" onClick={openBuilder}>Create task</button></div> : <>
         <section className="catalog-filters" aria-label="Catalog filters"><label><span>Readiness</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}><option value="ALL">All readiness levels</option><option value="DRAFT">Draft</option><option value="WORKING">Working</option><option value="READY">Ready</option><option value="PRIORITY">Priority</option></select></label><label><span>Industry / topic</span><select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}><option value="ALL">All industries</option>{industries.map((industry) => <option key={industry} value={industry}>{industry}</option>)}</select></label><span className="filter-note">Showing {filteredCatalog.length} of {catalog.length} published tasks</span></section>
-        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>No tasks match these filters</h2><p>Every confirmed task remains in the catalog. Change a filter to view it.</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>Clear filters</button></div> : <div className="cards">{filteredCatalog.map((task, index) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry || 'Open topic'}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {score.level}</b></div><h2>{displayTitle(task)}</h2><p>{task.need || task.context || 'Business details will be shared after the team opens this challenge.'}</p><div className="meta">For: {task.users || 'Not specified yet'}</div><button className="secondary" onClick={() => openProposal(task.id)}>Open task & submit proposal</button></article>; })}</div>}
+        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>No tasks match these filters</h2><p>Every confirmed task remains in the catalog. Change a filter to view it.</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>Clear filters</button></div> : <div className="cards">{filteredCatalog.map((task, index) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry || 'Open topic'}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {score.level}</b></div><h2>{displayTitle(task)}</h2><p>{task.need || task.context || 'Business details will be shared after the team opens this challenge.'}</p><div className="meta">For: {task.users || 'Not specified yet'}</div><button className="secondary" onClick={() => openProposal(task.id)}>Open task & submit proposal</button><button onClick={() => editTask(task)}>Edit as business</button></article>; })}</div>}
       </>}
     </main>}
 
     {view === 'proposals' && <main>
       <div className="hero"><div><div className="eyebrow">BUSINESS DECISION</div><h1>Humans choose the team.</h1><p className="lede">Review each proposal in full, then manually accept or reject it.</p></div></div>
-      {proposals.length === 0 ? <div className="empty-state"><h2>No proposals yet</h2><p>Published tasks are visible in the catalog for student teams to explore and propose on.</p></div> : <div className="proposal-list">{proposals.map((proposal) => {
+      <label>Compare proposals for task<select value={decisionTask} onChange={e => setDecisionTask(e.target.value)}><option value="ALL">All tasks</option>{catalog.map(task => <option key={task.id} value={task.id}>{displayTitle(task)}</option>)}</select></label>
+<section className="panel team-points"><h2>Confirmed team progress</h2>{seedTeams.map(team => <p key={team.id}>{team.name}: {proposals.filter(p => p.teamId === team.id).reduce((sum, p) => sum + (p.progress?.points ?? 0), 0)} points</p>)}</section>
+{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).length === 0 ? <div className="empty-state"><h2>No proposals yet</h2><p>Published tasks are visible in the catalog for student teams to explore and propose on.</p></div> : <div className="proposal-list">{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).map((proposal) => {
         const task = tasks.find((item) => item.id === proposal.taskId);
         const team = seedTeams.find((item) => item.id === proposal.teamId);
-        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{proposal.status}</b></div><h2>{task ? displayTitle(task) : 'Published task'}</h2><dl><div><dt>Solution idea</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>Plan</dt><dd>{proposal.plan}</dd></div><div><dt>Timeline</dt><dd>{proposal.timeline}</dd></div><div><dt>Prototype</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>Reject</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>Accept</button></div></article>;
+        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{proposal.status}</b></div><h2>{task ? displayTitle(task) : 'Published task'}</h2><p>Skills: {team?.skills.join(', ')} · Technologies: {team?.technologies.join(', ')} · Interests: {team?.interests.join(', ')}</p><dl><div><dt>Solution idea</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>Plan</dt><dd>{proposal.plan}</dd></div><div><dt>Timeline</dt><dd>{proposal.timeline}</dd></div><div><dt>Prototype</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>Reject</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>Accept</button></div>{proposal.progress ? <p>Confirmed stage: {proposal.progress.evidence} · +{proposal.progress.points} points · {new Date(proposal.progress.confirmedAt).toLocaleString()}</p> : proposal.status === 'ACCEPTED' && <section><label>Completed stage and evidence<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>Business: confirm completed stage (+10 points)</button></section>}</article>;
       })}</div>}
     </main>}
 
     {publicationOpen && <div className="modal-backdrop" role="presentation"><section className="modal" role="dialog" aria-modal="true" aria-labelledby="publish-title"><div className="eyebrow">HUMAN CONFIRMATION</div><h2 id="publish-title">Publish this task to the catalog?</h2><p><b>{displayTitle(draft)}</b> will become visible to every student team. Its readiness score changes ranking, never access.</p><div className="actions"><button onClick={() => setPublicationOpen(false)}>Keep editing</button><button className="primary" onClick={confirmPublish}>Publish task</button></div></section></div>}
 
-    {selectedTask && <div className="modal-backdrop" role="presentation"><section className="modal proposal-modal" role="dialog" aria-modal="true" aria-labelledby="proposal-title"><div className="eyebrow">STUDENT PROPOSAL</div><h2 id="proposal-title">{displayTitle(selectedTask)}</h2><p>Choose your own team and provide the complete proposal for business review.</p><form onSubmit={submitProposal}><label><span>Student team</span><select value={proposalTeamId} onChange={(event) => setProposalTeamId(event.target.value)}><option value="">Choose a team</option>{seedTeams.map((team) => <option key={team.id} value={team.id}>{team.name} — {team.skills.join(', ')}</option>)}</select></label><label><span>Solution idea</span><textarea value={proposalDraft.solutionIdea} onChange={(event) => setProposalDraft({ ...proposalDraft, solutionIdea: event.target.value })} /></label><label><span>Plan</span><textarea value={proposalDraft.plan} onChange={(event) => setProposalDraft({ ...proposalDraft, plan: event.target.value })} /></label><label><span>Timeline</span><input value={proposalDraft.timeline} onChange={(event) => setProposalDraft({ ...proposalDraft, timeline: event.target.value })} placeholder="For example: 3 days" /></label><label><span>Prototype URL</span><input type="url" value={proposalDraft.prototypeUrl} onChange={(event) => setProposalDraft({ ...proposalDraft, prototypeUrl: event.target.value })} placeholder="https://…" /></label>{proposalError && <div className="inline-message">{proposalError}</div>}<div className="actions"><button type="button" onClick={() => setSelectedTaskId(null)}>Cancel</button><button className="primary" type="submit">Submit for business review</button></div></form></section></div>}
+    {selectedTask && <div className="modal-backdrop" role="presentation"><section className="modal proposal-modal" role="dialog" aria-modal="true" aria-labelledby="proposal-title"><div className="eyebrow">STUDENT PROPOSAL</div><h2 id="proposal-title">{displayTitle(selectedTask)}</h2><dl className="task-details">{fields.map(field => <div key={field.key}><dt>{field.label}</dt><dd>{String(selectedTask[field.key]) || 'Not specified — requires clarification'}</dd></div>)}</dl><ScorePanel task={selectedTask} /><p>Choose your own team and provide the complete proposal for business review.</p><form onSubmit={submitProposal}><label><span>Student team</span><select value={proposalTeamId} onChange={(event) => setProposalTeamId(event.target.value)}><option value="">Choose a team</option>{seedTeams.map((team) => <option key={team.id} value={team.id}>{team.name} — {team.skills.join(', ')}</option>)}</select></label><label><span>Solution idea</span><textarea value={proposalDraft.solutionIdea} onChange={(event) => setProposalDraft({ ...proposalDraft, solutionIdea: event.target.value })} /></label><label><span>Plan</span><textarea value={proposalDraft.plan} onChange={(event) => setProposalDraft({ ...proposalDraft, plan: event.target.value })} /></label><label><span>Timeline</span><input value={proposalDraft.timeline} onChange={(event) => setProposalDraft({ ...proposalDraft, timeline: event.target.value })} placeholder="For example: 3 days" /></label><label><span>Prototype URL</span><input type="url" value={proposalDraft.prototypeUrl} onChange={(event) => setProposalDraft({ ...proposalDraft, prototypeUrl: event.target.value })} placeholder="https://…" /></label>{proposalError && <div className="inline-message">{proposalError}</div>}<div className="actions"><button type="button" onClick={() => setSelectedTaskId(null)}>Cancel</button><button className="primary" type="submit">Submit for business review</button></div></form></section></div>}
   </div>;
 }

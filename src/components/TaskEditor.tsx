@@ -1,6 +1,6 @@
 import type { TaskCard } from '../types/domain';
 
-const fields: { key: keyof TaskCard; label: string; large?: boolean }[] = [
+export const fields: { key: keyof TaskCard; label: string; large?: boolean }[] = [
   { key: 'title', label: 'Title' }, { key: 'industry', label: 'Industry / topic' },
   { key: 'context', label: 'Context', large: true }, { key: 'need', label: 'Need / problem', large: true },
   { key: 'users', label: 'Users', large: true }, { key: 'data', label: 'Data & materials', large: true },
