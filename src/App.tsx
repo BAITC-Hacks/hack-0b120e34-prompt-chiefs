@@ -8,7 +8,7 @@ import { ScorePanel } from './components/ScorePanel';
 import { TaskEditor, getTaskFields } from './components/TaskEditor';
 import { DemoJourney } from './components/DemoJourney';
 import { Preferences } from './components/Preferences';
-import { createTranslator, loadPreference, savePreference, type FontScale, type Locale, type MotionPreference, type Theme } from './lib/i18n';
+import { createTranslator, displayIndustry, loadPreference, savePreference, type FontScale, type Locale, type MotionPreference, type Theme } from './lib/i18n';
 import './styles.css';
 
 type View = 'catalog' | 'builder' | 'proposals';
@@ -72,7 +72,7 @@ export default function App() {
 
   function startFromBrief() {
     if (!brief.trim()) {
-      setBuilderError('Add a short description first. The wording is kept as business-provided context.');
+      setBuilderError(t('shortDescriptionRequired'));
       return;
     }
     setDraft({ ...blankTask(), context: brief.trim() });
@@ -87,7 +87,7 @@ export default function App() {
     setBrief(demo.context);
     setQuestions([]);
     setAnswers({});
-    setBuilderError('Demo brief loaded. Run Task Doctor, then replace or expand any details with your own facts.');
+    setBuilderError(t('demoLoaded'));
   }
 
   async function askAi() {
@@ -95,31 +95,31 @@ export default function App() {
     setBuilderError('');
     try {
       const nextQuestions = await taskDoctor.getClarifyingQuestions(draft);
-      if (nextQuestions.length < 3) throw new Error('The Task Doctor needs three questions.');
+      if (nextQuestions.length < 3) throw new Error('Missing clarification questions');
       setQuestions(nextQuestions);
       setAnswers({});
       setDoctorState('idle');
     } catch {
       setDoctorState('error');
-      setBuilderError('Task Doctor is unavailable. Check the optional AI endpoint or continue editing the card directly.');
+      setBuilderError(t('doctorUnavailable'));
     }
   }
 
   async function applyAnswers() {
     if (!allAnswersProvided) {
-      setBuilderError('Answer all three questions before applying them to the card.');
+      setBuilderError(t('needThreeAnswers'));
       return;
     }
     const updated = await taskDoctor.applyAnswers(draft, questions, answers);
     setDraft(updated);
     setQuestions([]);
     setAnswers({});
-    setBuilderError('Answers applied. You can edit every field before publishing.');
+    setBuilderError(t('answersApplied'));
   }
 
   function confirmPublish() {
     if (!draft.title.trim() || !draft.context.trim()) {
-      setBuilderError('Provide a title and business description. Other missing details lower readiness but do not prevent publication.');
+      setBuilderError(t('titleContextRequired'));
       setPublicationOpen(false);
       return;
     }
@@ -147,14 +147,14 @@ export default function App() {
   function submitProposal(event: FormEvent) {
     event.preventDefault();
     if (!selectedTaskId || !proposalTeamId || !Object.values(proposalDraft).every((value) => value.trim())) {
-      setProposalError('Choose a team and complete every proposal field.');
+      setProposalError(t('proposalRequired'));
       return;
     }
     try {
       const url = new URL(proposalDraft.prototypeUrl);
       if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported protocol');
     } catch {
-      setProposalError('Prototype URL must include http:// or https://.');
+      setProposalError(t('urlRequired'));
       return;
     }
     const proposal: Proposal = {
@@ -222,7 +222,7 @@ export default function App() {
         <div className="eyebrow">{t('businessWorkspace')}</div>
         <h1>{t('builderTitle')}</h1>
         <p className="lede">{t('builderLead')}</p>
-        <section className="brief-box" aria-label="Start from a business description">
+        <section className="brief-box" aria-label={t('roughDescription')}>
           <label><span>{t('roughDescription')}</span><textarea value={brief} onChange={(event) => setBrief(event.target.value)} placeholder={t('roughPlaceholder')} /></label>
           <div className="brief-actions"><button className="secondary" onClick={startFromBrief}>{t('useDescription')}</button><button className="text-button" onClick={useDemoBrief}>{t('loadDemo')}</button></div>
         </section>
@@ -230,12 +230,12 @@ export default function App() {
         <p>{t('readinessPreview')}</p>
         {builderError && <div className="inline-message" role="status">{builderError}</div>}
         <div className="actions">
-          <button className="secondary" onClick={askAi} disabled={doctorState === 'loading'}>{doctorState === 'loading' ? t('doctorWorking') : t('taskDoctor')}</button>
+          <button className="secondary" onClick={askAi} disabled={doctorState === 'loading'}>{doctorState === 'loading' ? t('doctorWorking') : t('assistantName')}</button>
           <button className="primary" onClick={() => setPublicationOpen(true)}>{t('confirmPublish')}</button>
         </div>
-        {doctorState === 'error' && <div className="error-state">{t('doctorLead')}</div>}
+        {doctorState === 'error' && <div className="error-state">{t('doctorUnavailable')}</div>}
         {questions.length > 0 && <section className="ai-box" aria-live="polite">
-          <div><div className="eyebrow">AI TASK DOCTOR</div><h3>{t('doctorHeading')}</h3><p>{t('doctorLead')}</p></div>
+          <div><div className="eyebrow">{t('assistantName')}</div><h3>{t('doctorHeading')}</h3><p>{t('assistantHint')} · {t('doctorLead')}</p></div>
           {questions.map((question) => <label key={question.id}><span>{question.question}</span><textarea value={answers[question.id] || ''} onChange={(event) => setAnswers({ ...answers, [question.id]: event.target.value })} /></label>)}
           <button className="primary" onClick={applyAnswers} disabled={!allAnswersProvided}>{t('applyAnswers')}</button>
         </section>}
@@ -247,8 +247,8 @@ export default function App() {
       <div className="hero"><div><div className="eyebrow">{t('openCatalog')}</div><h1>{t('catalogTitle')}</h1><p className="lede">{t('catalogLead')}</p></div><button className="primary" onClick={openBuilder}>{t('postChallenge')}</button></div>
       <DemoJourney locale={locale} />
       {catalog.length === 0 ? <div className="empty-state"><h2>{t('noTasks')}</h2><p>{t('noTasksLead')}</p><button className="primary" onClick={openBuilder}>{t('createTask')}</button></div> : <>
-        <section className="catalog-filters" aria-label="Catalog filters"><label><span>{t('readiness')}</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}><option value="ALL">{t('allReadiness')}</option><option value="DRAFT">{t('draft')}</option><option value="WORKING">{t('working')}</option><option value="READY">{t('ready')}</option><option value="PRIORITY">{t('priority')}</option></select></label><label><span>{t('industry')}</span><select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}><option value="ALL">{t('allIndustries')}</option>{industries.map((industry) => <option key={industry} value={industry}>{industry}</option>)}</select></label><span className="filter-note">{t('showing', { shown: filteredCatalog.length, total: catalog.length })}</span></section>
-        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>{t('noMatches')}</h2><p>{t('noMatchesLead')}</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>{t('clearFilters')}</button></div> : <div className="cards">{filteredCatalog.map((task) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; const level = score.level === 'DRAFT' ? t('draft') : score.level === 'WORKING' ? t('working') : score.level === 'READY' ? t('ready') : t('priority'); return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry || t('openTopic')}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {level}</b></div><h2>{displayTitle(task, t('notSpecified'))}</h2><p>{task.need || task.context || t('notSpecifiedClarify')}</p><div className="meta">{t('forUsers', { users: task.users || t('notSpecified') })}</div><button className="secondary" onClick={() => openProposal(task.id)}>{t('openTask')}</button><button onClick={() => editTask(task)}>{t('editBusiness')}</button></article>; })}</div>}
+        <section className="catalog-filters" aria-label={t('catalog')}><label><span>{t('readiness')}</span><select value={levelFilter} onChange={(event) => setLevelFilter(event.target.value)}><option value="ALL">{t('allReadiness')}</option><option value="DRAFT">{t('draft')}</option><option value="WORKING">{t('working')}</option><option value="READY">{t('ready')}</option><option value="PRIORITY">{t('priority')}</option></select></label><label><span>{t('industry')}</span><select value={industryFilter} onChange={(event) => setIndustryFilter(event.target.value)}><option value="ALL">{t('allIndustries')}</option>{industries.map((industry) => <option key={industry} value={industry}>{displayIndustry(industry, locale)}</option>)}</select></label><span className="filter-note">{t('showing', { shown: filteredCatalog.length, total: catalog.length })}</span></section>
+        {filteredCatalog.length === 0 ? <div className="empty-state"><h2>{t('noMatches')}</h2><p>{t('noMatchesLead')}</p><button className="secondary" onClick={() => { setLevelFilter('ALL'); setIndustryFilter('ALL'); }}>{t('clearFilters')}</button></div> : <div className="cards">{filteredCatalog.map((task) => { const score = scoreTask(task); const rank = catalog.findIndex((item) => item.id === task.id) + 1; const level = score.level === 'DRAFT' ? t('draft') : score.level === 'WORKING' ? t('working') : score.level === 'READY' ? t('ready') : t('priority'); return <article className="task-card" key={task.id}><div className="card-top"><span>#{rank} · {task.industry ? displayIndustry(task.industry, locale) : t('openTopic')}</span><b className={`pill ${score.level.toLowerCase()}`}>{score.total} · {level}</b></div><h2>{displayTitle(task, t('notSpecified'))}</h2><p>{task.need || task.context || t('notSpecifiedClarify')}</p><div className="meta">{t('forUsers', { users: task.users || t('notSpecified') })}</div><div className="card-actions"><button className="secondary" onClick={() => openProposal(task.id)}>{t('openTask')}</button><button onClick={() => editTask(task)}>{t('editBusiness')}</button></div></article>; })}</div>}
       </>}
     </main>}
 
@@ -259,7 +259,8 @@ export default function App() {
 {proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).length === 0 ? <div className="empty-state"><h2>{t('noProposals')}</h2><p>{t('noProposalsLead')}</p></div> : <div className="proposal-list">{proposals.filter(p => decisionTask === 'ALL' || p.taskId === decisionTask).map((proposal) => {
         const task = tasks.find((item) => item.id === proposal.taskId);
         const team = seedTeams.find((item) => item.id === proposal.teamId);
-        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{proposal.status}</b></div><h2>{task ? displayTitle(task, t('notSpecified')) : t('notSpecified')}</h2><p>{t('skills')}: {team?.skills.join(', ')} · {t('technologies')}: {team?.technologies.join(', ')} · {t('interests')}: {team?.interests.join(', ')}</p><dl><div><dt>{t('solutionIdea')}</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>{t('plan')}</dt><dd>{proposal.plan}</dd></div><div><dt>{t('timeline')}</dt><dd>{proposal.timeline}</dd></div><div><dt>{t('prototype')}</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>{t('reject')}</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>{t('accept')}</button></div>{proposal.progress ? <p>{t('confirmedStage')}: {proposal.progress.evidence} · +{proposal.progress.points} {t('points')} · {new Date(proposal.progress.confirmedAt).toLocaleString(locale)}</p> : proposal.status === 'ACCEPTED' && <section><label>{t('completedStage')}<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>{t('confirmStage')}</button></section>}</article>;
+        const status = proposal.status === 'PENDING' ? t('pending') : proposal.status === 'ACCEPTED' ? t('accepted') : t('rejected');
+        return <article className="proposal-card" key={proposal.id}><div className="card-top"><span>{team?.name || proposal.teamId}</span><b className={`pill ${proposal.status.toLowerCase()}`}>{status}</b></div><h2>{task ? displayTitle(task, t('notSpecified')) : t('notSpecified')}</h2><p>{t('skills')}: {team?.skills.join(', ')} · {t('technologies')}: {team?.technologies.join(', ')} · {t('interests')}: {team?.interests.join(', ')}</p><dl><div><dt>{t('solutionIdea')}</dt><dd>{proposal.solutionIdea}</dd></div><div><dt>{t('plan')}</dt><dd>{proposal.plan}</dd></div><div><dt>{t('timeline')}</dt><dd>{proposal.timeline}</dd></div><div><dt>{t('prototype')}</dt><dd><a href={proposal.prototypeUrl} target="_blank" rel="noreferrer">{proposal.prototypeUrl}</a></dd></div></dl><div className="actions"><button onClick={() => setStatus(proposal.id, 'REJECTED')}>{t('reject')}</button><button className="primary" onClick={() => setStatus(proposal.id, 'ACCEPTED')}>{t('accept')}</button></div>{proposal.progress ? <p>{t('confirmedStage')}: {proposal.progress.evidence} · +{proposal.progress.points} {t('points')} · {new Date(proposal.progress.confirmedAt).toLocaleString(locale)}</p> : proposal.status === 'ACCEPTED' && <section><label>{t('completedStage')}<textarea value={progressEvidence[proposal.id] || ''} onChange={e => setProgressEvidence({ ...progressEvidence, [proposal.id]: e.target.value })} /></label><button disabled={!progressEvidence[proposal.id]?.trim()} onClick={() => confirmProgress(proposal.id)}>{t('confirmStage')}</button></section>}</article>;
       })}</div>}
     </main>}
 
